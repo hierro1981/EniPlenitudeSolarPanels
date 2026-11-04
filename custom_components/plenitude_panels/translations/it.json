@@ -1,0 +1,171 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pannelli solari Plenitude",
+        "description": "Inserisci i dati di sessione Plenitude acquisiti dal browser.",
+        "data": {
+          "cookie": "Header Cookie",
+          "user_agent": "User-Agent del browser",
+          "account_id": "ID account",
+          "supply_id": "ID fornitura",
+          "pod": "POD (per il recupero produzione)",
+          "recovery_enabled": "Recupero produzione mancante",
+          "poll_interval": "Intervallo aggiornamento dati pannelli"
+        },
+        "data_description": {
+          "user_agent": "Copia il valore completo di User-Agent dalla stessa richiesta del browser da cui copi l'header Cookie.",
+          "pod": "Inserisci il POD usato da productions-consumes. Il recupero resta in attesa finche' il POD non viene configurato.",
+          "recovery_enabled": "Ricostruisce le giornate concluse dei pannelli senza letture positive e corregge lo storico del dashboard Energia. Disabilitandolo, le letture ordinarie continuano.",
+          "poll_interval": "Scegli ogni quanti minuti aggiornare i dati dei pannelli. Il mantenimento della sessione browser continua ogni 5 minuti."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ricollega Plenitude",
+        "description": "Plenitude ha rifiutato la sessione salvata. Copia Cookie e User-Agent dalla stessa richiesta riuscita del browser.",
+        "data": {
+          "cookie": "Header Cookie",
+          "user_agent": "User-Agent del browser"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile collegarsi a Plenitude.",
+      "session_rejected": "Plenitude ha rifiutato la richiesta (HTTP 406). Copia Cookie e User-Agent dalla stessa richiesta riuscita del browser. Se persiste, la protezione del sito potrebbe rifiutare questo client.",
+      "invalid_auth": "La sessione browser Plenitude non e' valida o e' scaduta."
+    },
+    "abort": {
+      "already_configured": "Questa fornitura Plenitude e' gia' configurata.",
+      "reauth_successful": "Plenitude e' stata ricollegata."
+    }
+  },
+  "options": {
+    "error": {
+      "already_configured": "Questa fornitura Plenitude e' gia' configurata.",
+      "session_rejected": "Plenitude ha rifiutato la richiesta (HTTP 406). Copia Cookie e User-Agent dalla stessa richiesta riuscita del browser. Se persiste, la protezione del sito potrebbe rifiutare questo client.",
+      "cannot_connect": "Impossibile collegarsi a Plenitude.",
+      "invalid_auth": "La sessione browser Plenitude non e' valida o e' scaduta.",
+      "date_not_past": "Scegli una data precedente a oggi.",
+      "pod_required": "Configura un POD in Impostazioni prima di recuperare la produzione.",
+      "no_panels": "Nessun pannello disponibile. Attendi un aggiornamento riuscito.",
+      "aggregate_not_ready": "La giornata aggregata contiene soltanto zeri. Riprova dopo la pubblicazione dei dati.",
+      "invalid_recovery_data": "I dati aggregati sono incompleti, non validi o hanno orari ambigui. Scegli un'altra data o riprova piu' tardi.",
+      "legacy_recovery_unknown": "Non e' possibile attribuire con certezza a una giornata un recupero precedente: il relativo audit nel Recorder non e' disponibile. Non e' stata aggiunta energia.",
+      "history_unavailable": "Impossibile leggere lo storico del Recorder. Riprova quando il database e' disponibile.",
+      "invalid_panels": "Seleziona almeno un pannello disponibile.",
+      "invalid_energy": "Inserisci un valore di energia finito e non negativo in Wh.",
+      "energy_exceeds_aggregate": "La produzione originale piu' i recuperi precedenti supera il totale aggregato.",
+      "confirmation_required": "Conferma l'anteprima per applicare il recupero.",
+      "preview_stale": "La fornitura, i pannelli o i recuperi sono cambiati. Riavvia la procedura per ottenere una nuova anteprima.",
+      "cannot_save_recovery": "Impossibile salvare il recupero. Non e' stato pubblicato un nuovo totale: riprova.",
+      "repair_recorder_required": "Il Recorder deve essere abilitato per riparare le statistiche.",
+      "repair_no_statistics": "Abilita i sensori Total Production e attendi le prime statistiche prima della riparazione.",
+      "repair_timezone": "La riparazione richiede giornate locali allineate alle ore UTC. Serve un fuso orario Home Assistant compatibile.",
+      "repair_unit": "La statistica di produzione deve usare Wh, kWh o MWh.",
+      "repair_invalid_statistics": "Statistiche non finite o non valide impediscono la riparazione. Controlla i diagnostici del Recorder.",
+      "repair_no_alignment": "Le statistiche orarie e ogni cinque minuti non hanno un riferimento comune. Attendi un'ora completa di statistiche e riprova.",
+      "repair_select_anomalous": "Seleziona tutti i pannelli con statistiche negative o recuperi non ancora applicati per questa data.",
+      "repair_pending": "Un recupero non e' ancora stato registrato/elaborato oppure riguarda un'altra data. Attendi il Recorder o ripara prima la data di quel recupero.",
+      "repair_boundary": "Una diminuzione attraversa il confine con il giorno successivo. Ripara prima quel giorno, poi analizza nuovamente questa data.",
+      "repair_no_backup": "Non ci sono riparazioni completate da annullare.",
+      "repair_undo_conflict": "Statistiche o marcatori di audit sono cambiati dopo la riparazione. L'annullamento non puo' sovrascriverli: analizza nuovamente la data.",
+      "repair_waiting": "L'operazione del Recorder potrebbe essere ancora in corso. Attendi e riapri lo strumento: il registro verifica se e' stata completata.",
+      "repair_save_failed": "Impossibile salvare il punto di ripristino. Riapri lo strumento dopo il prossimo controllo periodico per verificarne il registro.",
+      "repair_database_error": "Il Recorder non ha completato l'operazione sul database. Riapri lo strumento per riconciliare il registro."
+    },
+    "abort": {
+      "integration_not_loaded": "Carica l'integrazione prima di avviare il recupero manuale.",
+      "recovery_closed": "Sessione di recupero chiusa.",
+      "repair_completed": "Riparazione delle statistiche completata. Aggiorna il dashboard Energia. I totali correnti e la cronologia grezza dei sensori restano invariati. In Configura e' disponibile Annulla ultima riparazione.",
+      "repair_undone": "Sono state ripristinate le somme statistiche e le condizioni di audit dei recuperi salvate.",
+      "repair_no_backup": "Non ci sono riparazioni completate da annullare.",
+      "repair_undo_conflict": "Statistiche o marcatori di audit sono cambiati dopo la riparazione. Analizza nuovamente la data invece di annullare quelle modifiche.",
+      "preview_stale": "L'anteprima e' cambiata. Riapri la procedura prima di applicare o annullare.",
+      "repair_recorder_required": "Il Recorder deve essere abilitato per riparare le statistiche.",
+      "repair_waiting": "L'operazione del Recorder potrebbe essere ancora in corso. Attendi e riapri lo strumento per riconciliare il registro.",
+      "repair_save_failed": "Impossibile salvare il punto di ripristino. Riapri lo strumento per riconciliare il registro.",
+      "repair_database_error": "Il Recorder non ha completato l'operazione sul database. Riapri lo strumento per riconciliare il registro.",
+      "recovery_completed": "Recupero completato. I totali sono aggiornati; lo storico Energia viene completato dopo che il Recorder ha elaborato l'aumento. Un'aggiunta pari a zero lascia invariati i totali."
+    },
+    "step": {
+      "init": {
+        "title": "Pannelli solari Plenitude",
+        "menu_options": {
+          "settings": "Impostazioni",
+          "recovery_date": "Recupera produzione",
+          "repair_date": "Ripara statistiche",
+          "repair_undo": "Annulla ultima riparazione statistiche"
+        }
+      },
+      "recovery_date": {
+        "title": "Recupera produzione per una data",
+        "description": "Analizza una giornata conclusa usando l'API aggregata, lo storico locale e il Recorder. Il comando funziona anche con il recupero automatico disabilitato. Nessuna energia viene aggiunta prima della conferma.",
+        "data": {"date": "Data della produzione"}
+      },
+      "recovery_targets": {
+        "title": "Completa i dati del recupero",
+        "description": "**Data:** {date}  \n**Produzione aggregata:** {aggregate} Wh  \n**Produzione originale gia' registrata:** {known} Wh  \n**Gia' recuperata:** {previous} Wh  \n**Energia residua:** {remaining} Wh\n\n| Pannello | Registrata (Wh) | Recuperata (Wh) | Nuova quota (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\n- **—** Dato non disponibile o non ancora calcolato.\n- **≥** Minimo osservato, non un totale completo.\n- **≈** Ripartizione stimata sulla curva aggregata.\n\nVerifica i destinatari e la produzione ORIGINALE gia' conteggiata su TUTTI i pannelli, escludendo i recuperi precedenti. I pannelli senza dati o con zero registrato sono preselezionati. Se tutti i pannelli sono senza dati, viene proposto 0 Wh come ipotesi modificabile, non come totale misurato. Con dati parziali, un totale sconosciuto resta vuoto. Le tue modifiche vengono conservate tornando dall'anteprima.\n\nLa prossima anteprima calcola la nuova quota per ogni pannello in base alla potenza nominale (in parti uguali se assente). Il profilo ogni 15 minuti di una stima giornaliera segue la curva aggregata.",
+        "data": {
+          "panels": "Pannelli a cui attribuire l'energia mancante",
+          "known_energy_wh": "Produzione originale gia' conteggiata, esclusi i recuperi"
+        }
+      },
+      "recovery_confirm": {
+        "title": "Anteprima del recupero produzione",
+        "description": "**Data:** {date}  \n**Produzione aggregata:** {aggregate} Wh  \n**Produzione originale gia' conteggiata:** {known} Wh  \n**Gia' recuperata:** {previous} Wh  \n**Nuovo recupero:** {additional} Wh\n\n| Pannello | Originale rilevata (Wh) | Recuperata (Wh) | Nuova quota (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\n- **—** Dato non disponibile o non ancora calcolato.\n- **≥** Minimo osservato, non un totale completo.\n- **≈** Ripartizione stimata sulla curva aggregata.\n\nUn totale giornaliero inserito manualmente non viene ripartito nei valori originali rilevati per pannello.\n\n**Modalita':** {mode} (15 min = residui per intervallo).\n\nConferma per aggiornare i totali e le statistiche del giorno originale. I recuperi precedenti vengono conservati. Seleziona Modifica ripartizione per cambiare destinatari o produzione originale invece di applicare.",
+        "data": {
+          "confirm": "Conferma e applica il recupero",
+          "edit_allocation": "Modifica ripartizione invece di applicare"
+        }
+      },
+      "recovery_done": {
+        "title": "Recupero completato",
+        "description": "Il recupero del **{date}** e' completato. I totali sono aggiornati; lo storico Energia viene completato dopo che il Recorder ha elaborato l'aumento. Un'aggiunta pari a zero lascia invariati i totali.\n\nScegli un giorno adiacente per avviare una nuova analisi. Destinatari e quantita' vengono ricalcolati per quella data e richiedono conferma prima dell'applicazione.",
+        "menu_options": {
+          "recovery_previous": "← Giorno precedente ({previous_date})",
+          "recovery_next": "Giorno successivo ({next_date}) →",
+          "recovery_close": "Chiudi"
+        }
+      },
+      "repair_date": {
+        "title": "Analizza le statistiche di produzione",
+        "description": "Scegli una giornata conclusa. Lo strumento confronta le somme cumulative registrate con la produzione aggregata API e gli audit dei recuperi. Nessuna statistica cambia prima della conferma.",
+        "data": {"date": "Data da riparare"}
+      },
+      "repair_targets": {
+        "title": "Scegli le statistiche da ricostruire",
+        "description": "**Data:** {date}  \n**Produzione aggregata:** {aggregate} Wh  \n**Campioni API negativi normalizzati a zero:** {negative_api}\n\n| Pannello | Giornata attuale (Wh) | Diminuzioni | Giornata proposta (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nSeleziona i pannelli le cui statistiche giornaliere devono essere SOSTITUITE, non incrementate. I totali validi dei pannelli non selezionati vengono conservati. L'energia aggregata residua viene ripartita per potenza nominale, mantenendo come minimo l'energia gia' recuperata di ciascun pannello. Il profilo ogni 15 minuti e' stimato, non una misura originale del pannello. I recuperi in coda devono prima essere elaborati dal Recorder.",
+        "data": {"panels": "Pannelli di cui ricostruire le statistiche giornaliere"}
+      },
+      "repair_confirm": {
+        "title": "Conferma la riparazione delle statistiche",
+        "description": "**Data:** {date}  \n**Produzione aggregata:** {aggregate} Wh  \n**Righe statistiche da modificare:** {rows}\n\n| Pannello | Giornata attuale (Wh) | Diminuzioni | Giornata proposta (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nLa giornata selezionata viene ricostruita sul profilo aggregato. Le somme normalizzate successive vengono traslate per conservare gli incrementi di energia successivi e allineare statistiche orarie e ogni cinque minuti. Totali correnti dei sensori, cronologia originale e quantita' recuperate restano invariati. Altre date con diminuzioni indipendenti richiedono una propria riparazione.\n\nI valori precedenti vengono salvati prima della transazione sul database. Si puo' annullare solo l'ultima riparazione: una nuova applicazione sostituisce il punto di ripristino precedente. L'annullamento viene rifiutato se altre correzioni hanno modificato le righe salvate.",
+        "data": {"confirm": "Conferma la sostituzione delle statistiche", "edit_allocation": "Modifica invece la selezione dei pannelli"}
+      },
+      "repair_undo": {
+        "title": "Annulla l'ultima riparazione delle statistiche",
+        "description": "Ripristina le somme salvate prima della riparazione del **{date}**. Le statistiche aggiunte successivamente vengono adeguate per rimuovere l'offset di quella riparazione. Correzioni alle righe salvate effettuate dopo la riparazione impediscono l'annullamento.",
+        "data": {"confirm": "Ripristina le statistiche salvate"}
+      },
+      "settings": {
+        "title": "Configura pannelli solari Plenitude",
+        "description": "Aggiorna le credenziali Plenitude o le impostazioni dell'integrazione.",
+        "data": {
+          "cookie": "Header Cookie",
+          "user_agent": "User-Agent del browser",
+          "account_id": "ID account",
+          "supply_id": "ID fornitura",
+          "pod": "POD (per il recupero produzione)",
+          "recovery_enabled": "Recupero produzione mancante",
+          "poll_interval": "Intervallo aggiornamento dati pannelli"
+        },
+        "data_description": {
+          "user_agent": "Copia il valore completo di User-Agent dalla stessa richiesta del browser da cui copi l'header Cookie.",
+          "pod": "Inserisci il POD usato da productions-consumes. Il recupero resta in attesa finche' il POD non viene configurato.",
+          "recovery_enabled": "Ricostruisce le giornate concluse dei pannelli senza letture positive e corregge lo storico del dashboard Energia. Disabilitandolo, le letture ordinarie continuano.",
+          "poll_interval": "Scegli ogni quanti minuti aggiornare i dati dei pannelli. Il mantenimento della sessione browser continua ogni 5 minuti."
+        }
+      }
+    }
+  }
+}

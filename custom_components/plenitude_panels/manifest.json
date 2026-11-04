@@ -1,0 +1,12 @@
+{
+  "domain": "plenitude_panels",
+  "name": "Plenitude Solar Panels",
+  "codeowners": ["@hierro1981"],
+  "config_flow": true,
+  "documentation": "https://github.com/hierro1981/EniPlenitudeSolarPanels",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/hierro1981/EniPlenitudeSolarPanels/issues",
+  "requirements": ["Babel==2.17.0"],
+  "version": "0.10.1"
+}

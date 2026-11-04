@@ -1,0 +1,4 @@
+# Reproducible test baseline; runtime dependencies belong in the component manifest.
+homeassistant==2025.10.4
+Babel==2.17.0
+pytest==9.2.0

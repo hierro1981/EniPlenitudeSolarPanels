@@ -3,9 +3,11 @@
 Integrazione custom per monitorare in Home Assistant i pannelli fotovoltaici
 associati al proprio account Plenitude, tramite le API del portale My Eni.
 
-[![Validazione](https://github.com/hierro1981/EniPlenitudeSolarPanels/actions/workflows/validate.yml/badge.svg)](https://github.com/hierro1981/EniPlenitudeSolarPanels/actions/workflows/validate.yml)
+[![Pubblicazione](https://github.com/hierro1981/EniPlenitudeSolarPanels/actions/workflows/validate.yml/badge.svg)](https://github.com/hierro1981/EniPlenitudeSolarPanels/actions/workflows/validate.yml)
 [![Licenza MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Apri in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=hierro1981&repository=EniPlenitudeSolarPanels&category=integration)
+
+**Versione nel repository: `0.10.1`** · [Changelog completo](custom_components/plenitude_panels/CHANGELOG.md) · [Release pubblicate](https://github.com/hierro1981/EniPlenitudeSolarPanels/releases)
 
 **Progetto indipendente e non ufficiale**, non affiliato a Eni o Plenitude.
 Il servizio è basato sul cloud Plenitude: disponibilità, frequenza dei dati e
@@ -200,7 +202,7 @@ custom_components/plenitude_panels/  Integrazione installata da HACS/Home Assist
 tests/                             Test e fixture
 docs/                              Guide e riferimento tecnico
 tools/node/                        Strumenti diagnostici opzionali
-.github/workflows/                 Validazione HACS, Hassfest e test
+.github/workflows/                 Controlli e pubblicazione manuale delle release
 ```
 
 ## Licenza

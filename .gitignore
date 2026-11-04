@@ -1,0 +1,9 @@
+.env
+node_modules/
+monitor-logs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env.*
+!.env.example

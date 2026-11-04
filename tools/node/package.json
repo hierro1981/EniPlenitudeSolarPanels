@@ -1,0 +1,13 @@
+{
+  "name": "plenitude-api-poc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "node --env-file=.env login.mjs",
+    "refresh-session": "node --env-file=.env refresh-session.mjs",
+    "monitor-session": "node monitor-session.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}

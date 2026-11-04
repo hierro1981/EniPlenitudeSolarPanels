@@ -1,0 +1,171 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Plenitude Solar Panels",
+        "description": "Enter the Plenitude session values captured from the browser.",
+        "data": {
+          "cookie": "Cookie header",
+          "user_agent": "Browser User-Agent",
+          "account_id": "Account ID",
+          "supply_id": "Supply ID",
+          "pod": "POD (for production recovery)",
+          "recovery_enabled": "Recover missing production",
+          "poll_interval": "Panel data update interval"
+        },
+        "data_description": {
+          "user_agent": "Copy the complete User-Agent value from the same browser request as the Cookie header.",
+          "pod": "Enter the POD used by productions-consumes. Recovery waits until a POD is configured.",
+          "recovery_enabled": "Reconstruct completed days for panels with no positive readings and correct Energy Dashboard statistics. Live readings continue when disabled.",
+          "poll_interval": "Select every how many minutes panel data is refreshed. Browser session maintenance continues every 5 minutes."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Plenitude",
+        "description": "Plenitude rejected the saved session. Copy Cookie and User-Agent from the same successful browser request.",
+        "data": {
+          "cookie": "Cookie header",
+          "user_agent": "Browser User-Agent"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to Plenitude.",
+      "session_rejected": "Plenitude rejected the request (HTTP 406). Copy Cookie and User-Agent from the same successful browser request. If it persists, the site's protection may be rejecting this client.",
+      "invalid_auth": "The Plenitude browser session is invalid or has expired."
+    },
+    "abort": {
+      "already_configured": "This Plenitude supply is already configured.",
+      "reauth_successful": "Plenitude has been reconnected."
+    }
+  },
+  "options": {
+    "error": {
+      "already_configured": "This Plenitude supply is already configured.",
+      "session_rejected": "Plenitude rejected the request (HTTP 406). Copy Cookie and User-Agent from the same successful browser request. If it persists, the site's protection may be rejecting this client.",
+      "cannot_connect": "Unable to connect to Plenitude.",
+      "invalid_auth": "The Plenitude browser session is invalid or has expired.",
+      "date_not_past": "Choose a date before today.",
+      "pod_required": "Configure a POD in Settings before recovering production.",
+      "no_panels": "No panels are available. Wait for a successful update.",
+      "aggregate_not_ready": "The aggregate day contains only zero values. Try again after publication.",
+      "invalid_recovery_data": "The aggregate data is incomplete, invalid or has ambiguous timestamps. Try another date or retry later.",
+      "legacy_recovery_unknown": "An earlier recovery cannot be attributed to a day safely. Its Recorder audit is unavailable; no additional energy has been allocated.",
+      "history_unavailable": "Recorder history could not be read. Retry when the database is available.",
+      "invalid_panels": "Select at least one available panel.",
+      "invalid_energy": "Enter a finite, nonnegative energy value in Wh.",
+      "energy_exceeds_aggregate": "Original energy plus previous recoveries exceeds the aggregate total.",
+      "confirmation_required": "Confirm the preview to apply the recovery.",
+      "preview_stale": "The supply, panels or recovery ledger changed. Restart the procedure to obtain a new preview.",
+      "cannot_save_recovery": "Unable to save the recovery. No new total was published; retry.",
+      "repair_recorder_required": "Recorder must be enabled to repair statistics.",
+      "repair_no_statistics": "Enable the Total Production sensors and wait for their first statistics before repairing.",
+      "repair_timezone": "Repair currently requires local day boundaries aligned with UTC hours. Select a compatible Home Assistant timezone.",
+      "repair_unit": "The production statistic must use Wh, kWh or MWh.",
+      "repair_invalid_statistics": "Nonfinite or invalid statistics prevent repair. Check Recorder diagnostics.",
+      "repair_no_alignment": "Hourly and five-minute statistics have no common reference. Wait for a complete statistics hour and retry.",
+      "repair_select_anomalous": "Select all panels with negative statistics or unapplied recovery for this date.",
+      "repair_pending": "A recovery has not been recorded/compiled yet, or belongs to another date. Wait for Recorder or repair that recovery's date first.",
+      "repair_boundary": "A falling sum crosses the next-day boundary. Repair the next day first, then analyze this date again.",
+      "repair_no_backup": "There is no completed repair to undo.",
+      "repair_undo_conflict": "Statistics or audit markers changed after repair. Undo cannot overwrite those changes; analyze the date again.",
+      "repair_waiting": "The Recorder operation may still be running. Wait, then reopen the tool; its journal checks whether the operation committed.",
+      "repair_save_failed": "The repair checkpoint could not be saved. Reopen the tool after the next heartbeat to check its journal.",
+      "repair_database_error": "Recorder could not complete the database operation. Reopen the tool to reconcile its journal."
+    },
+    "abort": {
+      "integration_not_loaded": "Load the integration before starting a manual recovery.",
+      "recovery_closed": "Recovery session closed.",
+      "repair_completed": "Statistics repair completed. Refresh the Energy Dashboard. Live totals and raw sensor history were not changed. Undo last repair is available from Configure.",
+      "repair_undone": "The saved statistical sums and recovery audit states were restored.",
+      "repair_no_backup": "There is no completed repair to undo.",
+      "repair_undo_conflict": "Statistics or audit markers changed after repair. Analyze the date again instead of undoing those changes.",
+      "preview_stale": "The preview changed. Reopen the procedure before applying or undoing.",
+      "repair_recorder_required": "Recorder must be enabled to repair statistics.",
+      "repair_waiting": "The Recorder operation may still be running. Wait, then reopen the tool to reconcile its journal.",
+      "repair_save_failed": "The checkpoint could not be saved. Reopen the tool to reconcile its journal.",
+      "repair_database_error": "Recorder could not complete the database operation. Reopen the tool to reconcile its journal.",
+      "recovery_completed": "Recovery completed. Totals are updated; Energy Dashboard statistics finish after Recorder compiles the increase. A zero addition leaves totals unchanged."
+    },
+    "step": {
+      "init": {
+        "title": "Plenitude Solar Panels",
+        "menu_options": {
+          "settings": "Settings",
+          "recovery_date": "Recover production",
+          "repair_date": "Repair statistics",
+          "repair_undo": "Undo last statistics repair"
+        }
+      },
+      "recovery_date": {
+        "title": "Recover production for a date",
+        "description": "Analyze a completed day using aggregate API data, local history and Recorder. This command also works when automatic recovery is disabled. No energy is allocated until confirmation.",
+        "data": {"date": "Production date"}
+      },
+      "recovery_targets": {
+        "title": "Complete the recovery data",
+        "description": "**Date:** {date}  \n**Aggregate production:** {aggregate} Wh  \n**Original production already recorded:** {known} Wh  \n**Previously recovered:** {previous} Wh  \n**Remaining deficit:** {remaining} Wh\n\n| Panel | Recorded (Wh) | Recovered (Wh) | New allocation (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\n- **—** Unavailable or not calculated yet.\n- **≥** Observed lower bound, not a complete total.\n- **≈** Estimated allocation following the aggregate curve.\n\nReview the recipients and the ORIGINAL production already counted across ALL panels, excluding previous recoveries. Panels without data or with a recorded zero are preselected. When all panels have no data, 0 Wh is suggested as an editable assumption, not a measured total. With partial data, an unknown total is left blank. Your edits are retained when returning from the preview.\n\nThe next preview calculates the new allocation for each panel, weighted by nominal power (equal shares when unavailable). The quarter-hour profile of a daily estimate follows the aggregate curve.",
+        "data": {
+          "panels": "Panels receiving the missing energy",
+          "known_energy_wh": "Original production already counted, excluding recoveries"
+        }
+      },
+      "recovery_confirm": {
+        "title": "Review production recovery",
+        "description": "**Date:** {date}  \n**Aggregate production:** {aggregate} Wh  \n**Original production already counted:** {known} Wh  \n**Previously recovered:** {previous} Wh  \n**New recovery:** {additional} Wh\n\n| Panel | Original detected (Wh) | Recovered (Wh) | New allocation (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\n- **—** Unavailable or not calculated yet.\n- **≥** Observed lower bound, not a complete total.\n- **≈** Estimated allocation following the aggregate curve.\n\nA manually entered daily total is not split into detected panel values.\n\n**Mode:** {mode} (15 min = interval residuals).\n\nConfirm to update totals and original-day statistics. Previous recoveries are retained. Select Edit allocation to change the recipients or the original energy instead of applying.",
+        "data": {
+          "confirm": "Confirm and apply recovery",
+          "edit_allocation": "Edit allocation instead of applying"
+        }
+      },
+      "recovery_done": {
+        "title": "Recovery completed",
+        "description": "Recovery for **{date}** is complete. Totals are updated; Energy Dashboard statistics finish after Recorder compiles the increase. A zero addition leaves totals unchanged.\n\nChoose an adjacent day to start a new analysis. Recipients and quantities are recalculated for that date and require confirmation before being applied.",
+        "menu_options": {
+          "recovery_previous": "← Previous day ({previous_date})",
+          "recovery_next": "Next day ({next_date}) →",
+          "recovery_close": "Close"
+        }
+      },
+      "repair_date": {
+        "title": "Analyze production statistics",
+        "description": "Choose a completed day. The tool compares recorded cumulative sums with aggregate API production and recovery audits. No statistics are changed before confirmation.",
+        "data": {"date": "Date to repair"}
+      },
+      "repair_targets": {
+        "title": "Choose statistics to reconstruct",
+        "description": "**Date:** {date}  \n**Aggregate production:** {aggregate} Wh  \n**Negative API samples normalized to zero:** {negative_api}\n\n| Panel | Current day (Wh) | Falling sums | Proposed day (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nSelect panels whose daily statistics must be REPLACED, not increased. Nonselected valid panel totals are retained. Remaining aggregate energy is distributed by nominal power, keeping already recovered panel energy as a minimum. This is an estimated quarter-hour profile, not original panel measurements. Incomplete queued recoveries must finish compiling first.",
+        "data": {"panels": "Panels whose daily statistics will be reconstructed"}
+      },
+      "repair_confirm": {
+        "title": "Confirm statistics repair",
+        "description": "**Date:** {date}  \n**Aggregate production:** {aggregate} Wh  \n**Statistical rows to change:** {rows}\n\n| Panel | Current day (Wh) | Falling sums | Proposed day (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nThe selected day is rebuilt using the aggregate profile. Later normalized sums are shifted to preserve subsequent energy increments and align hourly/five-minute statistics. Live sensor totals, original state history and recovery amounts stay unchanged. Other dates with independent negative increments need their own repair.\n\nPrevious values are saved before the database transaction. Only the latest repair can be undone; applying a new repair replaces the previous checkpoint. Undo is refused if other corrections changed saved rows.",
+        "data": {"confirm": "Confirm statistics replacement", "edit_allocation": "Change panel selection instead"}
+      },
+      "repair_undo": {
+        "title": "Undo last statistics repair",
+        "description": "Restore the sums saved before the repair of **{date}**. Later appended statistics are adjusted to remove that repair's offset. Corrections made to saved rows after the repair prevent undo.",
+        "data": {"confirm": "Restore saved statistics"}
+      },
+      "settings": {
+        "title": "Configure Plenitude Solar Panels",
+        "description": "Update Plenitude credentials or integration settings.",
+        "data": {
+          "cookie": "Cookie header",
+          "user_agent": "Browser User-Agent",
+          "account_id": "Account ID",
+          "supply_id": "Supply ID",
+          "pod": "POD (for production recovery)",
+          "recovery_enabled": "Recover missing production",
+          "poll_interval": "Panel data update interval"
+        },
+        "data_description": {
+          "user_agent": "Copy the complete User-Agent value from the same browser request as the Cookie header.",
+          "pod": "Enter the POD used by productions-consumes. Recovery waits until a POD is configured.",
+          "recovery_enabled": "Reconstruct completed days for panels with no positive readings and correct Energy Dashboard statistics. Live readings continue when disabled.",
+          "poll_interval": "Select every how many minutes panel data is refreshed. Browser session maintenance continues every 5 minutes."
+        }
+      }
+    }
+  }
+}
