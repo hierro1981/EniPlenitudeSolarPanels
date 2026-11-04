@@ -1,4 +1,8 @@
-# Reproducible test baseline; runtime dependencies belong in the component manifest.
-homeassistant==2025.10.4
-Babel==2.17.0
+# Test environments selected by Python version. Runtime requirements are in the manifest.
+homeassistant==2025.10.4; python_version == "3.13"
+homeassistant==2026.9.4; python_version == "3.14"
+babel==2.18.0
+# aiodns 3.5.0 requires the pycares 4 API; 5.x breaks import on Linux.
+pycares==4.11.0; python_version == "3.13"
 pytest==9.2.0
+voluptuous-serialize==2.7.0

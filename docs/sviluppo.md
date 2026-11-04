@@ -12,7 +12,9 @@
 
 ## Ambiente di test
 
-La baseline riproducibile è **Python 3.13 e Home Assistant 2025.10.4**.
+I test coprono **Python 3.13 con Home Assistant 2025.10.4** e **Python 3.14
+con Home Assistant 2026.9.4**. `requirements-dev.txt` seleziona automaticamente
+la versione di Home Assistant in base all'interprete Python usato.
 Usa preferibilmente Linux, come nei runner CI: l'installazione completa di
 Home Assistant su Windows può richiedere compilatori per le dipendenze native.
 
@@ -25,6 +27,10 @@ source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m pytest tests -q
 ```
+
+Esegui gli stessi comandi in ambienti virtuali distinti per entrambe le versioni.
+La baseline 2025 vincola `pycares` alla serie 4 per compatibilità con il suo
+`aiodns`; il vincolo è limitato ai test e non modifica le dipendenze runtime.
 
 I test non richiedono credenziali reali o chiamate al portale. Verificano sessioni
 browser, recupero produzione, presentazione delle anteprime e transazioni sulle

@@ -1,12 +1,15 @@
 {
   "domain": "plenitude_panels",
   "name": "Plenitude Solar Panels",
+  "after_dependencies": ["recorder"],
+  "categories": ["energy.solar_batteries"],
   "codeowners": ["@hierro1981"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/hierro1981/EniPlenitudeSolarPanels",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/hierro1981/EniPlenitudeSolarPanels/issues",
-  "requirements": ["Babel==2.17.0"],
-  "version": "0.10.1"
+  "requirements": ["babel==2.18.0"],
+  "version": "0.10.2"
 }

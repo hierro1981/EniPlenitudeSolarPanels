@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.2
+
+### Fixed
+
+- Declare the HTTP dependency and load after Recorder when available, preserving operation without Recorder while fixing Home Assistant validation and startup ordering.
+- Align the Babel requirement with current Home Assistant integrations to avoid package conflicts; older Home Assistant installations using a different pinned Babel version may require an update.
+- Add the solar energy category for Home Assistant's integration catalog.
+
 ## 0.10.1
 
 ### Fixed

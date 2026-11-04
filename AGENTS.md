@@ -23,7 +23,7 @@ Changes limited to documentation, repository configuration or workflows outside 
 
 ## Verification and Documentation
 
-- For integration code changes, run `python -m pytest tests -q` with the dependencies from `requirements-dev.txt`. The reproducible baseline is Python 3.13 and Home Assistant 2025.10.4; see `docs/sviluppo.md`.
+- For integration code changes, run `python -m pytest tests -q` with the dependencies from `requirements-dev.txt` in both supported test environments: Python 3.13 / Home Assistant 2025.10.4 and Python 3.14 / Home Assistant 2026.9.4; see `docs/sviluppo.md`.
 - For workflow changes, verify YAML syntax, job dependencies, permissions and any embedded scripts locally where possible.
 - Keep the Italian `README.md` and relevant guides in `docs/` consistent with installation, configuration and publication changes. Preserve the detailed English reference in `docs/technical-reference.md`.
 

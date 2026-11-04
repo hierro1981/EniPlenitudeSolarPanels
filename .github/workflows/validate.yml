@@ -18,12 +18,12 @@ jobs:
       tag: ${{ steps.metadata.outputs.tag }}
       notes: ${{ steps.metadata.outputs.notes }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
       - name: Validate release metadata and availability
         id: metadata
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('node:fs');
@@ -77,23 +77,31 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
       - name: Validate integration
         uses: home-assistant/actions/hassfest@master
 
   tests:
-    name: Tests (Home Assistant 2025.10.4)
+    name: Tests (Home Assistant ${{ matrix.homeassistant }})
     needs: prepare
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - homeassistant: "2025.10.4"
+            python: "3.13"
+          - homeassistant: "2026.9.4"
+            python: "3.14"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - name: Install test dependencies
@@ -109,7 +117,7 @@ jobs:
       contents: write
     steps:
       - name: Create tag and GitHub release on the validated commit
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           RELEASE_NOTES: ${{ needs.prepare.outputs.notes }}

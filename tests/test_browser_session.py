@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import voluptuous as vol
-import voluptuous_serialize
+try:
+    from probatio import to_field_list as serialize_schema
+except ImportError:
+    from voluptuous_serialize import convert as serialize_schema
 from multidict import CIMultiDict
 from homeassistant.helpers import config_validation as cv
 
@@ -125,7 +128,7 @@ def test_legacy_defaults_and_header_validation():
     for schema, values in ((_schema(), DATA), (_reauth_schema(), {"cookie": "new"})):
         with pytest.raises(vol.Invalid):
             schema({**values, "user_agent": "   "})
-        serialized = voluptuous_serialize.convert(schema, custom_serializer=cv.custom_serializer)
+        serialized = serialize_schema(schema, custom_serializer=cv.custom_serializer)
         assert next(field for field in serialized if field["name"] == "user_agent")["type"] == "string"
     with pytest.raises(PlenitudeApiError, match="single header"):
         PlenitudeApi(None, "cookie", "account", "supply", "Chrome/156\r\nInjected: header")
