@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3
+
+### Fixed
+
+- Declare Babel as a minimum requirement (`babel>=2.18.0`) instead of pinning an exact version, satisfying Hassfest and allowing newer versions selected by Home Assistant.
+
 ## 0.10.2
 
 ### Fixed

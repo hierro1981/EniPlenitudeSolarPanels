@@ -7,7 +7,7 @@ associati al proprio account Plenitude, tramite le API del portale My Eni.
 [![Licenza MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Apri in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=hierro1981&repository=EniPlenitudeSolarPanels&category=integration)
 
-**Versione nel repository: `0.10.2`** · [Changelog completo](custom_components/plenitude_panels/CHANGELOG.md) · [Release pubblicate](https://github.com/hierro1981/EniPlenitudeSolarPanels/releases)
+**Versione nel repository: `0.10.3`** · [Changelog completo](custom_components/plenitude_panels/CHANGELOG.md) · [Release pubblicate](https://github.com/hierro1981/EniPlenitudeSolarPanels/releases)
 
 **Progetto indipendente e non ufficiale**, non affiliato a Eni o Plenitude.
 Il servizio è basato sul cloud Plenitude: disponibilità, frequenza dei dati e
@@ -38,7 +38,7 @@ accesso dipendono dal portale e dalle sue API.
 Non servono Node.js, npm, Playwright o modifiche a `configuration.yaml`.
 I test coprono Home Assistant **2025.10.4** con Python **3.13** e
 **2026.9.4** con Python **3.14**; non dichiarano la compatibilità con tutte
-le altre versioni. L'integrazione richiede Babel 2.18.0: su versioni precedenti
+le altre versioni. L'integrazione richiede Babel **2.18.0 o successivo**: su versioni precedenti
 di Home Assistant un'altra integrazione potrebbe richiedere una versione diversa
 della stessa libreria; in caso di conflitto aggiorna Home Assistant.
 Le icone locali dell'integrazione sono supportate da Home Assistant 2026.3.
