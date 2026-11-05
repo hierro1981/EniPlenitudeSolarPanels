@@ -251,3 +251,22 @@ The integration version is declared in
 `custom_components/plenitude_panels/manifest.json` and is shown by Home
 Assistant in the integration details. Changes for each release are recorded in
 `custom_components/plenitude_panels/CHANGELOG.md`.
+## Per-panel live production limits (0.11.0)
+
+Each panel exposes configuration entities `switch` (Production limit) and
+`number` (Maximum allowed power, W). Settings are stored per entry and supply,
+loaded before the first coordinator refresh, and saved before publishing control
+changes. The global `limit_new_panels` setting defaults to true and only seeds
+unseen panel identifiers, including panels present at the first upgrade.
+
+The initial maximum is twice the details endpoint's nominal `power` in kW,
+converted to W (`0.9` or `0,9` gives 1800 W). Missing/zero/invalid nominal power
+leaves the number unknown; the switch's `threshold_required` attribute is true
+and no cap applies until a positive threshold is entered. Control changes apply
+to future API samples, without reprocessing the current sample.
+
+Before recovery storage and sensor publication, `instantProductionWh` values
+above an enabled threshold are capped and logged. This protects average power,
+five-minute energy (power / 12), cumulative energy and stored live recovery
+samples consistently. Existing history, statistics and aggregate recovery
+allocations are not rewritten or capped by this live-only check.

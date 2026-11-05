@@ -1,4 +1,8 @@
 {
+  "entity": {
+    "switch": {"production_limit": {"name": "Limite produzione"}},
+    "number": {"production_maximum": {"name": "Potenza massima consentita"}}
+  },
   "config": {
     "step": {
       "user": {
@@ -11,12 +15,14 @@
           "supply_id": "ID fornitura",
           "pod": "POD (per il recupero produzione)",
           "recovery_enabled": "Recupero produzione mancante",
+          "limit_new_panels": "Abilita limite per i nuovi pannelli",
           "poll_interval": "Intervallo aggiornamento dati pannelli"
         },
         "data_description": {
           "user_agent": "Copia il valore completo di User-Agent dalla stessa richiesta del browser da cui copi l'header Cookie.",
           "pod": "Inserisci il POD usato da productions-consumes. Il recupero resta in attesa finche' il POD non viene configurato.",
           "recovery_enabled": "Ricostruisce le giornate concluse dei pannelli senza letture positive e corregge lo storico del dashboard Energia. Disabilitandolo, le letture ordinarie continuano.",
+          "limit_new_panels": "Inizializza i nuovi pannelli con limite attivo e soglia pari al doppio della potenza nominale. I controlli individuali sono nel dispositivo pannello. Se manca la potenza nominale occorre impostare la soglia manualmente.",
           "poll_interval": "Scegli ogni quanti minuti aggiornare i dati dei pannelli. Il mantenimento della sessione browser continua ogni 5 minuti."
         }
       },
@@ -157,12 +163,14 @@
           "supply_id": "ID fornitura",
           "pod": "POD (per il recupero produzione)",
           "recovery_enabled": "Recupero produzione mancante",
+          "limit_new_panels": "Abilita limite per i nuovi pannelli",
           "poll_interval": "Intervallo aggiornamento dati pannelli"
         },
         "data_description": {
           "user_agent": "Copia il valore completo di User-Agent dalla stessa richiesta del browser da cui copi l'header Cookie.",
           "pod": "Inserisci il POD usato da productions-consumes. Il recupero resta in attesa finche' il POD non viene configurato.",
           "recovery_enabled": "Ricostruisce le giornate concluse dei pannelli senza letture positive e corregge lo storico del dashboard Energia. Disabilitandolo, le letture ordinarie continuano.",
+          "limit_new_panels": "Inizializza solo i nuovi pannelli senza modificare i controlli esistenti. Imposta soglia e interruttore nel dispositivo di ciascun pannello.",
           "poll_interval": "Scegli ogni quanti minuti aggiornare i dati dei pannelli. Il mantenimento della sessione browser continua ogni 5 minuti."
         }
       }

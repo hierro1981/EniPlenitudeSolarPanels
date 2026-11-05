@@ -1,4 +1,8 @@
 {
+  "entity": {
+    "switch": {"production_limit": {"name": "Production limit"}},
+    "number": {"production_maximum": {"name": "Maximum allowed power"}}
+  },
   "config": {
     "step": {
       "user": {
@@ -11,12 +15,14 @@
           "supply_id": "Supply ID",
           "pod": "POD (for production recovery)",
           "recovery_enabled": "Recover missing production",
+          "limit_new_panels": "Enable limit for new panels",
           "poll_interval": "Panel data update interval"
         },
         "data_description": {
           "user_agent": "Copy the complete User-Agent value from the same browser request as the Cookie header.",
           "pod": "Enter the POD used by productions-consumes. Recovery waits until a POD is configured.",
           "recovery_enabled": "Reconstruct completed days for panels with no positive readings and correct Energy Dashboard statistics. Live readings continue when disabled.",
+          "limit_new_panels": "Initialize new panels with the limit enabled and a threshold of twice their nominal power. Change individual controls on each panel device. A missing nominal power requires a manual threshold.",
           "poll_interval": "Select every how many minutes panel data is refreshed. Browser session maintenance continues every 5 minutes."
         }
       },
@@ -157,12 +163,14 @@
           "supply_id": "Supply ID",
           "pod": "POD (for production recovery)",
           "recovery_enabled": "Recover missing production",
+          "limit_new_panels": "Enable limit for new panels",
           "poll_interval": "Panel data update interval"
         },
         "data_description": {
           "user_agent": "Copy the complete User-Agent value from the same browser request as the Cookie header.",
           "pod": "Enter the POD used by productions-consumes. Recovery waits until a POD is configured.",
           "recovery_enabled": "Reconstruct completed days for panels with no positive readings and correct Energy Dashboard statistics. Live readings continue when disabled.",
+          "limit_new_panels": "Only initializes newly discovered panels; existing panel controls are preserved. Set the maximum power and switch on each panel device.",
           "poll_interval": "Select every how many minutes panel data is refreshed. Browser session maintenance continues every 5 minutes."
         }
       }

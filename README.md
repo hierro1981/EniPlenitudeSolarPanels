@@ -7,7 +7,7 @@ associati al proprio account Plenitude, tramite le API del portale My Eni.
 [![Licenza MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Apri in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=hierro1981&repository=EniPlenitudeSolarPanels&category=integration)
 
-**Versione nel repository: `0.10.3`** · [Changelog completo](custom_components/plenitude_panels/CHANGELOG.md) · [Release pubblicate](https://github.com/hierro1981/EniPlenitudeSolarPanels/releases)
+**Versione nel repository: `0.11.0`** · [Changelog completo](custom_components/plenitude_panels/CHANGELOG.md) · [Release pubblicate](https://github.com/hierro1981/EniPlenitudeSolarPanels/releases)
 
 **Progetto indipendente e non ufficiale**, non affiliato a Eni o Plenitude.
 Il servizio è basato sul cloud Plenitude: disponibilità, frequenza dei dati e
@@ -19,6 +19,7 @@ accesso dipendono dal portale e dalle sue API.
 - Potenza media, energia dell'ultimo intervallo di cinque minuti e produzione
   cumulativa utilizzabile nella dashboard Energia.
 - Irraggiamento quando il dato è fornito dal servizio.
+- Limite ai picchi anomali configurabile tramite interruttore e soglia per pannello.
 - Configurazione tramite interfaccia, con traduzioni italiane e inglesi.
 - Mantenimento della sessione browser ogni cinque minuti e procedura di
   riautenticazione quando il servizio rifiuta la sessione salvata.
@@ -111,6 +112,7 @@ Il login iniziale richiede il browser perché il portale può usare CAPTCHA e OT
 | Supply ID | Identificativo presente nel percorso API dopo `supply/`. |
 | POD | Facoltativo per il monitoraggio; necessario per il recupero storico. |
 | Recupera produzione mancante | Abilitato per impostazione predefinita; attende un POD prima di operare. |
+| Abilita limite per i nuovi pannelli | Attivo per impostazione predefinita; inizializza solo i pannelli mai rilevati prima. |
 | Intervallo aggiornamento | Minimo e valore consigliato: **5 minuti**. |
 
 I dati vengono verificati prima del salvataggio. Per modificarli successivamente,
@@ -123,6 +125,33 @@ effettua un nuovo login nel browser e aggiorna insieme Cookie e User-Agent.
 
 Cookie e configurazione vengono salvati da Home Assistant in `.storage`, senza
 cifratura applicativa. Non pubblicarli nelle issue o nei log condivisi.
+
+## Limite di produzione per pannello
+
+Ogni dispositivo pannello espone nella sezione **Configurazione**:
+
+- **Limite produzione**: interruttore per abilitare/disabilitare il controllo.
+- **Potenza massima consentita**: soglia modificabile in **W**.
+
+La soglia iniziale è il doppio della potenza nominale comunicata dall'API in kW:
+per un pannello da **0,9 kW**, il limite è **1.800 W**, equivalenti a **150 Wh
+in cinque minuti**. Le letture superiori vengono limitate alla soglia prima di
+aggiornare potenza media, energia dell'intervallo, totale e campioni del recupero.
+Ogni lettura limitata viene segnalata nel registro.
+
+Se manca una potenza nominale valida, la soglia resta sconosciuta: impostala
+manualmente per rendere operativo il filtro. L'attributo `threshold_required`
+dell'interruttore segnala questa condizione. Un interruttore acceso senza soglia
+non applica alcun limite.
+
+Le impostazioni per pannello sono persistenti e caricate prima della prima
+lettura dopo un riavvio; le modifiche alle entità valgono dalla lettura successiva.
+**Configura > Impostazioni > Abilita limite per i nuovi pannelli** decide solo
+lo stato iniziale dei nuovi dispositivi. Al primo aggiornamento a questa versione,
+anche i pannelli già esistenti vengono inizializzati con il controllo attivo.
+Le successive modifiche dell'opzione generale non sovrascrivono i controlli individuali.
+Il filtro non modifica picchi già registrati, statistiche storiche o allocazioni
+del recupero, e non redistribuisce nel tempo l'energia accumulata dal portale.
 
 ## Sensori e dashboard Energia
 

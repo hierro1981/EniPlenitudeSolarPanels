@@ -18,6 +18,7 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
 )
+from .production_limit import ProductionLimits
 from .recovery import ProductionRecovery
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,7 +48,14 @@ class PlenitudeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._last_panel_update: datetime | None = None
         self.sample_id: int | None = None
         self.recovery = ProductionRecovery(hass, entry, api)
+        self.production_limits = ProductionLimits(hass, entry)
         self._operation_lock = asyncio.Lock()
+
+    async def async_set_production_limit(self, panel_id: str, **changes) -> None:
+        """Serialize durable control changes with polling; affect future samples."""
+        async with self._operation_lock:
+            await self.production_limits.async_update(panel_id, **changes)
+            self.async_update_listeners()
 
     async def async_analyze_recovery(self, day):
         """Serialize manual analysis with polling and session rotations."""
@@ -157,6 +165,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 return self.data
 
             panels = await self.api.async_fetch_panels()
+            panels = await self.production_limits.async_filter(panels)
             # The API reports energy for a five-minute window. This id makes a
             # repeated refresh in the same window safe for cumulative sensors.
             sample_id = int(now.timestamp() // 300)
@@ -167,6 +176,8 @@ class PlenitudeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return {panel["identifier"]: panel for panel in panels}
         except PlenitudeAuthError as err:
             raise ConfigEntryAuthFailed from err
+        except OSError as err:
+            raise UpdateFailed("Unable to persist panel production limits or samples") from err
         except PlenitudeApiError as err:
             if not panel_refresh_due and self.data is not None:
                 _LOGGER.debug(

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0
+
+### Added
+
+- Add a configuration switch and maximum-power number entity for each panel, with durable settings loaded before the first poll. The initial threshold is twice the API nominal power (kW converted to W); missing nominal power leaves the threshold unset until entered manually, exposed by `threshold_required` on the switch.
+- Cap excessive live readings before average power, five-minute energy, cumulative production and recovery sample storage consume them. Log capped readings; changes to controls apply to future samples and do not rewrite existing history or recovered allocations.
+- Add the enabled-by-default “Enable limit for new panels” setting. It initializes newly discovered panels (including existing panels on first upgrade) without overwriting individual settings on later changes or restarts.
+
 ## 0.10.3
 
 ### Fixed

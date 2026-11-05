@@ -30,6 +30,7 @@ from .api import (
 from .const import (
     CONF_ACCOUNT_ID,
     CONF_COOKIE,
+    CONF_LIMIT_NEW_PANELS,
     CONF_POD,
     CONF_POLL_INTERVAL,
     CONF_RECOVERY_ENABLED,
@@ -58,6 +59,9 @@ def _schema(defaults: dict | None = None) -> vol.Schema:
             vol.Optional(CONF_POD, default=defaults.get(CONF_POD, "")): str,
             vol.Required(
                 CONF_RECOVERY_ENABLED, default=defaults.get(CONF_RECOVERY_ENABLED, True)
+            ): bool,
+            vol.Required(
+                CONF_LIMIT_NEW_PANELS, default=defaults.get(CONF_LIMIT_NEW_PANELS, True)
             ): bool,
             vol.Required(
                 CONF_POLL_INTERVAL,
@@ -97,6 +101,7 @@ def _entry_data(data: dict) -> dict:
         CONF_SUPPLY_ID: data[CONF_SUPPLY_ID],
         CONF_POD: data.get(CONF_POD, "").strip().upper(),
         CONF_RECOVERY_ENABLED: data.get(CONF_RECOVERY_ENABLED, True),
+        CONF_LIMIT_NEW_PANELS: data.get(CONF_LIMIT_NEW_PANELS, True),
         CONF_POLL_INTERVAL: int(data.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)),
     }
 

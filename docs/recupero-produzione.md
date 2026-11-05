@@ -109,3 +109,10 @@ Recorder o alla riapertura dello strumento.
 
 Per dettagli su retention, migrazione dei registri precedenti e transazioni,
 consulta il [riferimento tecnico](technical-reference.md).
+## Protezione delle nuove letture anomale
+
+Il limite per pannello descritto nel [README](../README.md#limite-di-produzione-per-pannello)
+viene applicato prima di salvare i campioni live usati dal recupero. I campioni
+superiori alla soglia attiva vengono limitati, non redistribuiti nel tempo.
+Il controllo non corregge campioni già salvati e non limita le allocazioni
+ricostruite dai dati aggregati storici.

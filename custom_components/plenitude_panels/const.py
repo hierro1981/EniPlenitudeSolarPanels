@@ -1,7 +1,7 @@
 """Constants for the Plenitude Solar Panels integration."""
 
 DOMAIN = "plenitude_panels"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "switch", "number"]
 
 CONF_COOKIE = "cookie"
 CONF_USER_AGENT = "user_agent"
@@ -10,6 +10,7 @@ CONF_SUPPLY_ID = "supply_id"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_POD = "pod"
 CONF_RECOVERY_ENABLED = "recovery_enabled"
+CONF_LIMIT_NEW_PANELS = "limit_new_panels"
 
 DEFAULT_POLL_INTERVAL = 5
 DEFAULT_USER_AGENT = (
