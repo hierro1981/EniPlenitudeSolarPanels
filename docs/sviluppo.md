@@ -25,10 +25,14 @@ source .venv/bin/activate
 # PowerShell, in alternativa:
 # .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
-python -m pytest tests -q
+python -B -m pytest tests -q
 ```
 
 Esegui gli stessi comandi in ambienti virtuali distinti per entrambe le versioni.
+L'opzione `-B` impedisce la scrittura dei file bytecode `.pyc` durante i test,
+evitando la creazione di nuove cartelle `__pycache__`. La cache di pytest 
+(`.pytest_cache`) è separata e non viene disabilitata da questa opzione.
+
 La baseline 2025 vincola `pycares` alla serie 4 per compatibilità con il suo
 `aiodns`; il vincolo è limitato ai test e non modifica le dipendenze runtime.
 
