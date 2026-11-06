@@ -340,6 +340,35 @@ def test_multiple_panels_mixed_units_and_existing_recoveries_are_respected(recor
     assert sum(row["change"] for rows in totals.values() for row in rows) == pytest.approx(900)
 
 
+def test_repair_suggests_both_a_positive_spike_and_negative_production(recorder):
+    async def run():
+        second = add_panel(recorder, "sensor.b", "kWh")
+        with recorder.get_session() as session:
+            session.query(Statistics).filter_by(metadata_id=1, start_ts=END - 3600).update({"sum": 54908.271})
+            session.query(Statistics).filter_by(metadata_id=second, start_ts=END - 3600).update({"sum": -1.410378})
+            session.commit()
+        panels = {"a": {"power": 0.9}, "b": {"power": 0.9}}
+        recovery = SimpleNamespace(
+            entry=SimpleNamespace(entry_id="entry", unique_id="account_supply"),
+            state={"pending": []}, entities={"a": "sensor.panel_total", "b": "sensor.b"},
+        )
+        hass = SimpleNamespace(config=SimpleNamespace(components={"recorder"}))
+
+        async def execute(hass, job, *args):
+            return job(recorder, *args)
+
+        with (
+            patch.object(manual_repair, "analyze_recovery", AsyncMock(return_value={
+                "aggregate": {QUARTER: 3301.350}, "panels": panels,
+            })),
+            patch.object(manual_repair.er, "async_get", return_value=SimpleNamespace()),
+            patch.object(manual_repair, "async_recorder_job", execute),
+        ):
+            inspected = await manual_repair.async_analyze(hass, recovery, panels, DAY)
+        assert inspected["suggested_repair"] == ["a", "b"]
+    asyncio.run(run())
+
+
 def test_pending_initial_baseline_is_not_subtracted_as_if_it_were_counted(recorder):
     with recorder.get_session() as session:
         for table in TABLES.values():

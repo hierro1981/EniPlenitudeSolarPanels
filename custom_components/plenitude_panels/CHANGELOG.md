@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.11.2
+
+### Fixed
+
+- Preserve live cumulative energy, its recovery reference and the last counted sample in a native Home Assistant restore checkpoint, including when the published sensor state is unavailable. Restarting after an unavailable state no longer silently loses live energy and creates a new Energy Dashboard spike or negative production.
+- Migrate valid legacy states with Wh/kWh/MWh conversion. If no usable checkpoint/state exists, recover the latest valid raw state from Recorder, never a repaired statistical sum. Existing counters with missing/inconsistent restore data or a lower recovery ledger remain unavailable and log the issue instead of publishing a reset; restore the saved data and reload to resume them.
+- Expose `live_energy_wh` on Total Production for diagnostics. Restored sampling IDs prevent counting the same positive five-minute reading again; repairs and undo continue to leave live/recovered counters untouched.
+- Suggest repairing panels whose positive daily energy exceeds the entire API aggregate, in addition to negative/missing production. This includes both positive-reset spikes and negative totals in the repair selection.
+
+## 0.11.1
+
+### Fixed
+
+- Isolate Plenitude HTTP sessions from Home Assistant's shared cookie jar and disable automatic cookie handling during setup, polling and configuration validation. Stale cookies can no longer override the configured browser Cookie header, and cookies from rejected responses cannot be reused automatically. Successful cookie updates remain managed and persisted by the integration.
+- Release temporary configuration-validation sessions after success or failure without closing Home Assistant's shared connector.
+
 ## 0.11.0
 
 ### Added

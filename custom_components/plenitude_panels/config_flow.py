@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import voluptuous as vol
+from aiohttp import DummyCookieJar
 from homeassistant.core import callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
     DateSelector,
     NumberSelector,
@@ -108,16 +109,23 @@ def _entry_data(data: dict) -> dict:
 
 async def _validate(hass, data: dict) -> dict[str, str]:
     """Verify credentials with the same sequence used by the coordinator."""
-    api = PlenitudeApi(
-        async_get_clientsession(hass),
-        data[CONF_COOKIE],
-        data[CONF_ACCOUNT_ID],
-        data[CONF_SUPPLY_ID],
-        user_agent=data.get(CONF_USER_AGENT, DEFAULT_USER_AGENT),
+    session = async_create_clientsession(
+        hass, auto_cleanup=False, cookie_jar=DummyCookieJar()
     )
-    await api.async_initialize_session()
-    await api.async_fetch_panels()
-    return api.session_data
+    try:
+        api = PlenitudeApi(
+            session,
+            data[CONF_COOKIE],
+            data[CONF_ACCOUNT_ID],
+            data[CONF_SUPPLY_ID],
+            user_agent=data.get(CONF_USER_AGENT, DEFAULT_USER_AGENT),
+        )
+        await api.async_initialize_session()
+        await api.async_fetch_panels()
+        return api.session_data
+    finally:
+        # Release this short-lived session without closing HA's shared connector.
+        session.detach()
 
 
 class PlenitudePanelsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

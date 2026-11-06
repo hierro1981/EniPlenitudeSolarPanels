@@ -7,7 +7,7 @@ associati al proprio account Plenitude, tramite le API del portale My Eni.
 [![Licenza MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Apri in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=hierro1981&repository=EniPlenitudeSolarPanels&category=integration)
 
-**Versione nel repository: `0.11.0`** · [Changelog completo](custom_components/plenitude_panels/CHANGELOG.md) · [Release pubblicate](https://github.com/hierro1981/EniPlenitudeSolarPanels/releases)
+**Versione nel repository: `0.11.2`** · [Changelog completo](custom_components/plenitude_panels/CHANGELOG.md) · [Release pubblicate](https://github.com/hierro1981/EniPlenitudeSolarPanels/releases)
 
 **Progetto indipendente e non ufficiale**, non affiliato a Eni o Plenitude.
 Il servizio è basato sul cloud Plenitude: disponibilità, frequenza dei dati e
@@ -123,6 +123,10 @@ di lettura dei pannelli più lunghi. Questo non garantisce che il portale la
 mantenga valida indefinitamente. Quando viene richiesta una riautenticazione,
 effettua un nuovo login nel browser e aggiorna insieme Cookie e User-Agent.
 
+La sessione HTTP è isolata dall'archivio cookie condiviso di Home Assistant:
+solo l'integrazione applica gli aggiornamenti dei cookie delle risposte riuscite,
+senza sovrascritture automatiche da cookie vecchi o ricevuti con risposte rifiutate.
+
 Cookie e configurazione vengono salvati da Home Assistant in `.storage`, senza
 cifratura applicativa. Non pubblicarli nelle issue o nei log condivisi.
 
@@ -161,7 +165,7 @@ I nomi delle entità attualmente esposti sono:
 | --- | --- | --- |
 | `Average Power (5 min)` | W | Potenza media dell'intervallo di cinque minuti riportato dall'API. |
 | `Production (5 min)` | Wh | Energia dello stesso intervallo. |
-| `Total Production` | Wh | Energia cumulativa, ripristinata dopo i normali riavvii. |
+| `Total Production` | Wh | Energia cumulativa con checkpoint nativo, ripristinato anche se l'ultimo stato era indisponibile. |
 | `Irradiance` | W/m² | Irraggiamento, se disponibile nell'API. |
 
 Il valore live dell'API è equivalente a una potenza media: l'integrazione lo

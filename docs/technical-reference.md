@@ -40,6 +40,12 @@ integration calls `c360/init` with the saved browser session and persists all
 returned cookie updates, including `GAESA` and `GYSESSION`. This session
 maintenance continues even when panel data is configured to refresh less often.
 
+Setup and configuration validation use dedicated HTTP sessions with automatic
+cookie handling disabled. Home Assistant's shared cookie jar cannot override
+the explicit Cookie header. Only the integration applies successful response
+cookie updates; rejected response cookies are not automatically reused.
+Temporary validation sessions are detached without closing HA's shared connector.
+
 When Plenitude rejects the saved browser session, Home Assistant starts a
 reauthentication flow. Capture Cookie and User-Agent from the same successful
 API request after a fresh browser login. Both fields are available in that flow.
@@ -251,6 +257,41 @@ The integration version is declared in
 `custom_components/plenitude_panels/manifest.json` and is shown by Home
 Assistant in the integration details. Changes for each release are recorded in
 `custom_components/plenitude_panels/CHANGELOG.md`.
+## Native cumulative restore checkpoints (0.11.2)
+
+`Total Production` now uses `RestoreSensor` and custom `SensorExtraStoredData` to
+persist native Wh, live Wh, the recovered Wh reference and the last accepted
+sampling ID together. The checkpoint remains numeric when the displayed state
+is unavailable and avoids restoring a converted/rounded presentation value.
+It is validated for finite nonnegative values and total = live + recovered.
+Only live energy is restored; the current durable recovery ledger is then added,
+so new committed recoveries are retained without counting old ones twice.
+
+Legacy numeric states remain supported in Wh, kWh and MWh. If checkpoint/state
+restoration is unavailable, an operation on Recorder's queue reads the latest
+valid raw state and its attributes for that entity. Normalized statistical sums
+are never a restore source: repairs intentionally change those independently.
+Existing entities with no recoverable baseline, database read failures or a
+recovery ledger lower than the saved reference remain unavailable, skip sample
+accumulation and log the problem rather than publishing an invented reset.
+Restore consistent saved data and reload to resume them. Brand-new entities
+with no saved state or recorded baseline initialize normally at zero.
+
+The old generic-state path initialized live Wh to zero on an unavailable saved
+state, leaving only recovered Wh. Real Recorder compilation reproduces both
+symptoms: 105000 -> 54000 Wh is a >10% reset and counts +54000 Wh; 24500 -> 23000 Wh
+is a smaller dip and counts -1500 Wh. Regression tests cover historical repair,
+journal reconciliation after restart, legacy unavailable-state fallback, actual
+five-minute sum compilation, hourly rollup, undo and a second restore. They also
+cover native checkpoint round trips, unavailable/converted display states,
+sample deduplication and additional committed recovery.
+
+`live_energy_wh` is exposed for diagnostics. The fix does not rewrite earlier
+state drops or infer a replacement current counter from historical maxima.
+Repair every affected panel on the contaminated day after updating. The wizard
+also suggests panels whose positive daily Wh exceed the entire API aggregate;
+this is an advisory check, not a complete anomaly detector.
+
 ## Per-panel live production limits (0.11.0)
 
 Each panel exposes configuration entities `switch` (Production limit) and

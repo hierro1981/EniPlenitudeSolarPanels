@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -13,12 +15,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, FIVE_MINUTE_HOUR_FRACTION
 from .coordinator import PlenitudeCoordinator
-from .recovery import number, production
+from .recovery import production
+from .total_restore import ProductionCheckpoint, checkpoint_values, last_recorded_total, state_values
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _five_minute_energy(value: Any) -> float | None:
@@ -130,7 +134,7 @@ class PlenitudeAveragePowerSensor(PlenitudePanelSensor):
         return production(self._panel.get("instantProductionWh"))
 
 
-class PlenitudeTotalProductionSensor(PlenitudePanelSensor, RestoreEntity):
+class PlenitudeTotalProductionSensor(PlenitudePanelSensor, RestoreSensor):
     """Cumulative panel energy suitable for the Home Assistant Energy dashboard."""
 
     _attr_name = "Total Production"
@@ -143,30 +147,67 @@ class PlenitudeTotalProductionSensor(PlenitudePanelSensor, RestoreEntity):
         self._attr_unique_id = f"{self._entry_unique_id}_{panel_id}_total_production"
         self._total_wh = 0.0
         self._last_sample_id: int | None = None
+        self._restore_failed = False
+        self._restore_pending = False
 
     async def async_added_to_hass(self) -> None:
         """Restore the running total and process the coordinator's current sample."""
+        self._restore_pending = True
         await super().async_added_to_hass()
         self.coordinator.recovery.entities[self._panel_id] = self.entity_id
-        if last_state := await self.async_get_last_state():
+        last_state = await self.async_get_last_state()
+        values = None
+        extra = await self.async_get_last_extra_data()
+        if extra is not None:
+            values = checkpoint_values(extra.as_dict())
+        if values is None and last_state is not None:
+            values = state_values(last_state.state, last_state.attributes)
+        if values is None and self.hass is not None and "recorder" in self.hass.config.components:
+            from .recovery_statistics import async_recorder_job
+
             try:
-                restored = number(last_state.state)
-                unit = last_state.attributes.get("unit_of_measurement", "Wh")
-                factor = {"Wh": 1, "kWh": 1000, "MWh": 1000000}.get(unit)
-                restored = restored * factor if restored is not None and factor is not None else None
-                recovered = number(last_state.attributes.get("recovered_energy_wh", 0)) or 0
-                self._total_wh = max(0, restored - recovered) if restored is not None else 0
-            except (TypeError, ValueError):
-                pass
-            try:
-                self._last_sample_id = int(last_state.attributes.get("last_sample_id"))
-            except (TypeError, ValueError):
-                pass
+                values = await async_recorder_job(self.hass, last_recorded_total, self.entity_id)
+            except Exception:
+                self._restore_failed = True
+                _LOGGER.exception("Unable to restore cumulative production for %s", self.entity_id)
+        if values is not None:
+            live, recovered, self._last_sample_id = values
+            if self.coordinator.recovery.total(self._panel_id) < recovered - 1e-6:
+                self._restore_failed = True
+            else:
+                self._total_wh = live
+        elif last_state is not None or extra is not None:
+            self._restore_failed = True
+        self._restore_pending = False
+        if self._restore_failed:
+            _LOGGER.error(
+                "Cumulative production for %s remains unavailable: no consistent saved "
+                "counter/recovery baseline. Restore its saved data and reload the integration; "
+                "the counter will not be reset to zero",
+                self.entity_id,
+            )
+            return
         self._add_current_sample()
+
+    @property
+    def available(self) -> bool:
+        return not self._restore_failed and super().available
+
+    @property
+    def extra_restore_state_data(self):
+        """Persist native counters even when HA publishes an unavailable state."""
+        if self._restore_failed or self._restore_pending:
+            return None
+        recovered = self.coordinator.recovery.total(self._panel_id)
+        return ProductionCheckpoint(
+            self._total_wh + recovered, "Wh", self._total_wh, recovered, self._last_sample_id,
+        )
 
     def _add_current_sample(self) -> None:
         """Add a valid API value at most once for each five-minute window."""
         sample_id = self.coordinator.sample_id
+        if self._restore_failed or self._restore_pending:
+            return
         if sample_id is None or sample_id == self._last_sample_id:
             return
         energy_wh = _five_minute_energy(self._panel.get("instantProductionWh"))
@@ -182,7 +223,9 @@ class PlenitudeTotalProductionSensor(PlenitudePanelSensor, RestoreEntity):
         super()._handle_coordinator_update()
 
     @property
-    def native_value(self) -> float:
+    def native_value(self) -> float | None:
+        if self._restore_failed:
+            return None
         return self._total_wh + self.coordinator.recovery.total(self._panel_id)
 
     @property
@@ -191,6 +234,7 @@ class PlenitudeTotalProductionSensor(PlenitudePanelSensor, RestoreEntity):
         return {
             **super().extra_state_attributes,
             "last_sample_id": self._last_sample_id,
+            "live_energy_wh": self._total_wh if not self._restore_failed else None,
             "recovered_energy_wh": recovery.total(self._panel_id),
             "last_recovered_day": recovery.state["last_days"].get(self._panel_id),
             "recovery_status": recovery.status,

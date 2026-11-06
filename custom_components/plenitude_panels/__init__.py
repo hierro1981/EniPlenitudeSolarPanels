@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from aiohttp import DummyCookieJar
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .api import PlenitudeApi, PlenitudeApiError, PlenitudeAuthError
 from .const import (
@@ -25,7 +26,7 @@ from .coordinator import PlenitudeCoordinator
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Plenitude Solar Panels from a config entry."""
     api = PlenitudeApi(
-        async_get_clientsession(hass),
+        async_create_clientsession(hass, cookie_jar=DummyCookieJar()),
         entry.data[CONF_COOKIE],
         entry.data[CONF_ACCOUNT_ID],
         entry.data[CONF_SUPPLY_ID],

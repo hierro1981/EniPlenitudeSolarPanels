@@ -66,7 +66,7 @@ contributo statistico sulla giornata originale. L'aggiornamento della dashboard
 può quindi richiedere ulteriore tempo e un successivo ciclo di cinque minuti.
 La cronologia degli stati grezzi continua a mostrare quando il totale è cambiato.
 
-Gli attributi del sensore espongono `recovered_energy_wh`, `last_recovered_day`,
+Gli attributi del sensore espongono `live_energy_wh`, `recovered_energy_wh`, `last_recovered_day`,
 `recovery_status` e `recovery_pending_statistics`. I marcatori
 `plenitude_panels:recovery_audit_*` servono a rendere i tentativi ripetibili;
 non sono sorgenti da selezionare nella dashboard Energia.
@@ -78,12 +78,16 @@ caso occorre prima riparare la giornata anomala.
 
 ## Ripara statistiche
 
-Per picchi negativi nella dashboard, scegli **Configura > Ripara statistiche**:
+Per picchi positivi o negativi nella dashboard, scegli **Configura > Ripara statistiche**:
 
 1. Seleziona una giornata conclusa.
 2. Esamina il confronto tra aggregato API e statistiche orarie di Recorder.
 3. Seleziona i pannelli interessati e confronta i totali correnti con i proposti.
 4. Conferma solo dopo aver controllato l'anteprima.
+
+La selezione suggerisce anche i pannelli il cui totale positivo supera l'intero
+aggregato API del giorno. Controlla comunque tutti i pannelli: il suggerimento
+non identifica ogni possibile anomalia.
 
 La riparazione **sostituisce le curve statistiche giornaliere** dei pannelli
 selezionati con un profilo stimato dall'aggregato, ripartito per potenza nominale.
@@ -97,6 +101,34 @@ compilati; recuperi pendenti di altre date devono essere risolti. I confini del
 giorno locale devono allinearsi alle ore UTC; timestamp ambigui sono rinviati.
 Campioni aggregati negativi finiti sono trattati come zero e conteggiati
 nell'analisi, mentre valori assenti o invalidi restano indisponibili.
+
+### Riavvio dopo una riparazione
+
+Dalla versione **0.11.2**, `Total Production` salva un checkpoint nativo con quota
+live, riferimento al recupero e ultimo campione conteggiato, anche se lo stato
+pubblicato è `unavailable`. La riparazione e il suo annullamento non modificano
+questo checkpoint. Per i salvataggi precedenti senza checkpoint viene usato lo
+stato numerico ripristinato oppure, se indisponibile, l'ultimo stato grezzo valido
+di Recorder. Le somme statistiche corrette non vengono usate come contatore live.
+
+Se esiste un vecchio contatore ma non è disponibile una base coerente (oppure il
+registro dei recuperi è inferiore al riferimento salvato), il sensore resta
+indisponibile e segnala il problema nei log, senza pubblicare un falso reset.
+Ripristina i dati salvati coerenti e ricarica l'integrazione. I nuovi pannelli
+senza alcuno stato precedente iniziano normalmente da zero.
+
+Un precedente calo del cumulativo può avere già generato un picco positivo o una
+produzione negativa nel dashboard Energia: Home Assistant può interpretare un
+calo superiore al 10% come un reset, mentre uno più piccolo può generare una
+variazione negativa. L'aggiornamento evita la perdita live al ripristino ma non
+riscrive automaticamente anomalie già registrate né cerca massimi storici da
+reinserire nel totale corrente.
+
+Per correggere una giornata già contaminata, installa prima la versione corretta,
+salva un backup comprensivo di Recorder e ripara **tutti i pannelli anomali** di
+quel giorno. Se sono tutti selezionati, la somma dei proposti deve corrispondere
+all'aggregato API; conferma dopo aver verificato l'anteprima. Attendi la successiva
+compilazione delle statistiche e verifica la continuità anche dopo un riavvio.
 
 ## Annullare l'ultima riparazione
 

@@ -40,10 +40,12 @@ async def async_analyze(hass, recovery, panels, day):
     )
     if set(analysis["snapshot"]["panels"]) != set(panels):
         raise RecoveryError("repair_no_statistics")
+    aggregate_wh = sum(analysis["aggregate"].values())
     analysis["suggested_repair"] = [
         panel for panel, data in analysis["snapshot"]["panels"].items()
         if data["hour"]["negative"] or not data["hour"]["has_day"]
         or data["hour"]["total"] <= 0 or any(not item["applied"] for item in data["pending"])
+        or data["hour"]["total"] * data["factor"] > aggregate_wh + 0.1
     ]
     return analysis
 

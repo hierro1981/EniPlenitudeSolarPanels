@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import voluptuous as vol
+from aiohttp import ClientRequest, DummyCookieJar
+from yarl import URL
 try:
     from probatio import to_field_list as serialize_schema
 except ImportError:
@@ -29,6 +31,8 @@ from custom_components.plenitude_panels.config_flow import (
     _validate,
 )
 from custom_components.plenitude_panels.const import DEFAULT_USER_AGENT
+from custom_components.plenitude_panels import async_setup_entry
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 DATA = {"cookie": "GAESA=private", "account_id": "account", "supply_id": "supply"}
 
@@ -141,11 +145,58 @@ def test_validation_passes_configured_identity():
             session_data={"cookie": "renewed"},
         )
         with (
-            patch("custom_components.plenitude_panels.config_flow.async_get_clientsession"),
+            patch("custom_components.plenitude_panels.config_flow.async_create_clientsession") as factory,
             patch("custom_components.plenitude_panels.config_flow.PlenitudeApi", return_value=api) as client,
         ):
             assert await _validate(Mock(), {**DATA, "user_agent": "custom browser"}) == {"cookie": "renewed"}
             assert client.call_args.kwargs["user_agent"] == "custom browser"
+            assert isinstance(factory.call_args.kwargs["cookie_jar"], DummyCookieJar)
+            assert factory.call_args.kwargs["auto_cleanup"] is False
+            factory.return_value.detach.assert_called_once_with()
+    asyncio.run(run())
+
+
+def assert_cookie_transport_is_isolated(jar):
+    """Exercise aiohttp's actual header merging with a stale server cookie."""
+    url = URL("https://eniplenitude.com/serviceDAp/api/c360/init")
+    jar.update_cookies({"GAESA": "stale", "TS01dc4fc6": "rejected"}, response_url=url)
+    supplied = "GAESA=fresh; GYSESSION=browser; TS01dc4fc6=browser"
+    request = ClientRequest(
+        "GET", url, headers={"Cookie": supplied}, cookies=jar.filter_cookies(url)
+    )
+    assert request.headers["Cookie"] == supplied
+
+
+def test_validation_failure_releases_isolated_session():
+    async def run():
+        api = SimpleNamespace(
+            async_initialize_session=AsyncMock(side_effect=PlenitudeSessionRejectedError),
+        )
+        with (
+            patch("custom_components.plenitude_panels.config_flow.async_create_clientsession") as factory,
+            patch("custom_components.plenitude_panels.config_flow.PlenitudeApi", return_value=api),
+        ):
+            with pytest.raises(PlenitudeSessionRejectedError):
+                await _validate(Mock(), DATA)
+            assert_cookie_transport_is_isolated(factory.call_args.kwargs["cookie_jar"])
+            factory.return_value.detach.assert_called_once_with()
+    asyncio.run(run())
+
+
+def test_setup_uses_isolated_cookie_transport():
+    async def run():
+        api = SimpleNamespace(
+            async_initialize_session=AsyncMock(side_effect=PlenitudeSessionRejectedError),
+        )
+        with (
+            patch("custom_components.plenitude_panels.async_create_clientsession") as factory,
+            patch("custom_components.plenitude_panels.PlenitudeApi", return_value=api) as client,
+        ):
+            with pytest.raises(ConfigEntryAuthFailed):
+                await async_setup_entry(Mock(), SimpleNamespace(data=DATA))
+            assert client.call_args.args[0] is factory.return_value
+            assert_cookie_transport_is_isolated(factory.call_args.kwargs["cookie_jar"])
+            assert "auto_cleanup" not in factory.call_args.kwargs
     asyncio.run(run())
 
 
