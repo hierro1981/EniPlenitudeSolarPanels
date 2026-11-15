@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plenitude Solar Panels per Home Assistant | Ramaya Software</title>
+  <meta name="description" content="Porta la produzione dei tuoi pannelli Plenitude in Home Assistant. Monitoraggio per pannello, dashboard Energia e recupero dei dati. Integrazione gratuita e open source.">
+  <meta name="theme-color" content="#083553">
+  <link rel="canonical" href="https://solar.ramaya.org/">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/site.css">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="it_IT">
+  <meta property="og:site_name" content="Ramaya Software">
+  <meta property="og:title" content="Plenitude Solar Panels per Home Assistant">
+  <meta property="og:description" content="La produzione dei tuoi pannelli, nella tua casa connessa. Un’integrazione indipendente, gratuita e open source.">
+  <meta property="og:url" content="https://solar.ramaya.org/">
+  <meta property="og:image" content="https://solar.ramaya.org/assets/social.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Plenitude Solar Panels",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Home Assistant",
+    "isAccessibleForFree": true,
+    "license": "https://github.com/hierro1981/EniPlenitudeSolarPanels/blob/main/LICENSE",
+    "url": "https://solar.ramaya.org/",
+    "downloadUrl": "https://github.com/hierro1981/EniPlenitudeSolarPanels/releases",
+    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "EUR"},
+    "description": "Integrazione custom indipendente per monitorare i pannelli Plenitude in Home Assistant tramite le API del portale My Eni."
+  }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#contenuto">Vai al contenuto</a>
+  <header class="wrap top">
+    <a class="brand" href="https://ramaya.org/" aria-label="Ramaya Software, pagina iniziale">
+      <img src="assets/logo-rs.svg" width="56" height="40" alt="">
+      <span>Ramaya <span class="brand-software">Software</span></span>
+    </a>
+    <nav class="nav" aria-label="Navigazione principale">
+      <a href="#funzioni">Funzioni</a><a href="#installazione">Installazione</a><a href="#faq">FAQ</a>
+      <a class="nav-github" href="https://github.com/hierro1981/EniPlenitudeSolarPanels">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="contenuto">
+    <section class="wrap hero" aria-labelledby="titolo">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="status-dot"></span> Plenitude Solar Panels · Home Assistant</p>
+        <h1 id="titolo">La tua energia.<br>Una casa più<br><em>connessa.</em></h1>
+        <p class="hero-description">La produzione dei tuoi pannelli Plenitude, direttamente in <strong>Home Assistant</strong>. Segui ogni pannello, porta i dati nella dashboard Energia e ritrova tutto in un unico posto.</p>
+        <div class="actions">
+          <a class="button" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=hierro1981&amp;repository=EniPlenitudeSolarPanels&amp;category=integration">Apri in HACS <span aria-hidden="true">↗</span></a>
+          <a class="text-link" href="#installazione">Come installarlo <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="hero-meta">Gratuito e open source <span aria-hidden="true">/</span> Nessun abbonamento all’integrazione</p>
+      </div>
+      <div class="solar-art" role="img" aria-label="Illustrazione di pannelli solari collegati a una casa. Il grafico è dimostrativo, non mostra dati reali.">
+        <div class="art-top"><span>DAL SOLE ALLA TUA DASHBOARD</span><span class="art-index">01 / SOLAR</span></div>
+        <svg class="solar-scene" viewBox="0 0 480 360" fill="none" aria-hidden="true">
+          <defs>
+            <pattern id="cells" width="42" height="35" patternUnits="userSpaceOnUse"><path d="M42 0H0V35" stroke="#94ccea" stroke-opacity=".5"/></pattern>
+            <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#28668b"/><stop offset="1" stop-color="#104362"/></linearGradient>
+          </defs>
+          <circle cx="358" cy="77" r="52" stroke="#f4ce66" stroke-opacity=".17"/>
+          <circle cx="358" cy="77" r="36" stroke="#f4ce66" stroke-opacity=".35"/>
+          <circle cx="358" cy="77" r="23" fill="#f4ce66"/>
+          <path d="M358 15v-8m0 140v-8m62-62h8m-140 0h8m106-44 6-6m-100 100 6-6m88 0 6 6M308 27l6 6" stroke="#f4ce66" stroke-width="2"/>
+          <path d="m324 121-40 52m62-42-29 39" stroke="#f4ce66" stroke-dasharray="4 7" opacity=".6"/>
+          <path d="M32 291h416M50 308h380" stroke="#b9e4fb" stroke-opacity=".12"/>
+          <path d="M116 255v35m115-35v35m-131 0h146" stroke="#81acc4" stroke-width="5"/>
+          <g transform="matrix(1 0 -.3 1 110 133)">
+            <rect width="210" height="140" rx="4" fill="url(#panel)" stroke="#b9e4fb" stroke-width="2"/>
+            <rect width="210" height="140" rx="4" fill="url(#cells)"/>
+            <path d="M105 0v140M0 70h210" stroke="#b9e4fb" stroke-width="2"/>
+          </g>
+          <path d="M270 243h42v-24" stroke="#f4ce66" stroke-width="2" stroke-dasharray="5 5"/>
+          <path d="m292 197 47-40 47 40m-82-9v76h70v-76" stroke="#b9e4fb" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M328 264v-33h23v33m-33-58h12v12h-12zm31 0h12v12h-12z" stroke="#b9e4fb" stroke-opacity=".65" stroke-width="2"/>
+          <circle cx="312" cy="243" r="4" fill="#f4ce66"/>
+        </svg>
+        <div class="art-readout"><div><span class="readout-label">La produzione, a colpo d’occhio</span><strong>Ogni pannello conta.</strong></div><svg width="108" height="40" viewBox="0 0 108 40" aria-hidden="true"><path d="M1 37c14 0 18-4 26-14S40 2 54 4s17 25 28 28 17 5 25 5" stroke="#f4ce66" stroke-width="2" fill="none"/><path d="M1 39h106" stroke="#62849a"/></svg></div>
+        <div class="art-bottom"><span>HOME ASSISTANT + PLENITUDE</span><span>ILLUSTRAZIONE DIMOSTRATIVA</span></div>
+      </div>
+    </section>
+
+    <div class="wrap facts" aria-label="Caratteristiche principali">
+      <div><span class="fact-number">01</span><span>Un dispositivo<br><strong>per ogni pannello</strong></span></div>
+      <div><span class="fact-number">05</span><span>Minuti tra le letture<br><strong>intervallo consigliato</strong></span></div>
+      <div><span class="fact-number fact-symbol" aria-hidden="true">↗</span><span>Dashboard Energia<br><strong>i tuoi dati, insieme</strong></span></div>
+    </div>
+
+    <section class="wrap section" id="funzioni" aria-labelledby="funzioni-title">
+      <div class="section-heading"><div><p class="eyebrow">Meno portali, più chiarezza</p><h2 id="funzioni-title">Il sole lavora.<br>Tu tieni tutto sotto controllo.</h2></div><p>Un’integrazione pensata per portare i dati del portale nella tua casa connessa. Senza cambiare le tue abitudini.</p></div>
+      <div class="feature-grid">
+        <article class="feature"><span class="feature-no">01 / MONITORAGGIO</span><h3>Un posto per ogni pannello</h3><p>Potenza media, energia dell’intervallo di cinque minuti e produzione cumulativa. Anche l’irraggiamento, quando fornito dal servizio.</p><a href="https://github.com/hierro1981/EniPlenitudeSolarPanels#sensori-e-dashboard-energia">Scopri i sensori <span aria-hidden="true">↗</span></a></article>
+        <article class="feature"><span class="feature-no">02 / ENERGIA</span><h3>Dentro la tua dashboard</h3><p>Aggiungi il sensore Total Production alla dashboard Energia di Home Assistant e consulta la produzione insieme agli altri dati di casa.</p><a href="#energia">Collega la dashboard <span aria-hidden="true">↓</span></a></article>
+        <article class="feature"><span class="feature-no">03 / CONTROLLO</span><h3>Più controllo sui picchi</h3><p>Un interruttore e una soglia di potenza per ogni pannello permettono di limitare le letture anomale prima che aggiornino i sensori.</p><a href="https://github.com/hierro1981/EniPlenitudeSolarPanels#limite-di-produzione-per-pannello">Come funziona il limite <span aria-hidden="true">↗</span></a></article>
+        <article class="feature"><span class="feature-no">04 / CONTINUITÀ</span><h3>Recupera i dati mancanti</h3><p>Con il POD configurato, confronta i dati locali con gli aggregati del servizio. Recupero manuale, riparazione e annullamento con anteprima e conferma.</p><a href="https://github.com/hierro1981/EniPlenitudeSolarPanels/blob/main/docs/recupero-produzione.md">Requisiti e limiti del recupero <span aria-hidden="true">↗</span></a></article>
+      </div>
+      <p class="section-note">Il recupero può usare una ripartizione <strong>stimata</strong> per pannello: non equivale sempre a una misura effettiva della produzione.</p>
+    </section>
+
+    <section class="setup-band" id="installazione" aria-labelledby="setup-title">
+      <div class="wrap section">
+        <div class="section-heading"><div><p class="eyebrow">Si parte da qui</p><h2 id="setup-title">Dal portale<br>alla tua casa connessa.</h2></div><p>Ti servono Home Assistant, un account Plenitude con pannelli visibili nel portale e una sessione browser autenticata.</p></div>
+        <ol class="steps">
+          <li><span class="step-number">01</span><h3>Installa con HACS</h3><p>Aggiungi il repository personalizzato come <strong>Integrazione</strong>, cerca Plenitude Solar Panels, scaricalo e riavvia Home Assistant.</p></li>
+          <li><span class="step-number">02</span><h3>Apri il portale</h3><p>Accedi a My Eni dal browser. Nella sezione pannelli, ricava Cookie, User-Agent, account ID e supply ID dalla stessa richiesta API riuscita.</p></li>
+          <li><span class="step-number">03</span><h3>Collega i tuoi pannelli</h3><p>Vai in <strong>Impostazioni → Dispositivi e servizi → Aggiungi integrazione</strong>. Cerca Plenitude Solar Panels e inserisci i dati richiesti.</p></li>
+        </ol>
+        <div class="setup-actions"><a class="button" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=hierro1981&amp;repository=EniPlenitudeSolarPanels&amp;category=integration">Apri in HACS <span aria-hidden="true">↗</span></a><a class="text-link" href="https://github.com/hierro1981/EniPlenitudeSolarPanels#configurazione">Guida completa alla configurazione <span aria-hidden="true">↗</span></a></div>
+        <div class="note"><strong>La prima connessione passa dal browser.</strong><p>Il portale può richiedere CAPTCHA o OTP. Non è un accesso automatico con email e password: quando la sessione scade, devi effettuare un nuovo login e aggiornare insieme Cookie e User-Agent. Non condividerli mai nelle segnalazioni.</p></div>
+        <details class="manual"><summary>Preferisci l’installazione manuale?</summary><div><p>Scarica il codice dalla <a href="https://github.com/hierro1981/EniPlenitudeSolarPanels/releases">release desiderata</a> e copia solo <code>custom_components/plenitude_panels/</code> nella cartella <code>custom_components/</code> della configurazione di Home Assistant. Riavvia e aggiungi l’integrazione da Dispositivi e servizi.</p><p>Il percorso finale deve essere <code>&lt;config&gt;/custom_components/plenitude_panels/manifest.json</code>. Non servono Node.js, npm o modifiche a <code>configuration.yaml</code>.</p></div></details>
+      </div>
+    </section>
+
+    <section class="wrap section energy" id="energia" aria-labelledby="energia-title">
+      <div class="energy-visual" aria-hidden="true"><span class="feature-no">IL TUO FLUSSO DI ENERGIA</span><div class="energy-flow"><span class="flow-sun">☀</span><span class="flow-line"></span><span class="flow-house">⌂</span></div><div class="energy-caption">Pannelli Plenitude <span>→</span> Home Assistant</div><div class="energy-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="visual-note">SCHEMA ILLUSTRATIVO · NON SONO DATI REALI</span></div>
+      <div><p class="eyebrow">Il quadro completo</p><h2 id="energia-title">La tua produzione,<br>insieme al resto.</h2><p class="lead">Apri <strong>Impostazioni → Dashboard → Energia</strong> e aggiungi il sensore <strong>Total Production</strong> di ciascun pannello come sorgente di produzione solare.</p><p>Il totale parte dalla prima lettura utile: non è il contatore storico del portale. Mantieni le letture ogni cinque minuti e lascia che Recorder registri i sensori per generare le statistiche.</p><a class="text-link" href="https://github.com/hierro1981/EniPlenitudeSolarPanels#sensori-e-dashboard-energia">Leggi i dettagli sui dati <span aria-hidden="true">↗</span></a></div>
+    </section>
+
+    <section class="wrap section faq-section" id="faq" aria-labelledby="faq-title">
+      <div><p class="eyebrow">Prima di iniziare</p><h2 id="faq-title">Buono a sapersi.</h2><p class="faq-intro">Uno strumento indipendente, con requisiti e limiti chiari.</p></div>
+      <div class="faq-list">
+        <details><summary>È un’integrazione ufficiale Plenitude?</summary><p>No. È un progetto indipendente e open source, distribuito con licenza MIT, non affiliato a Eni o Plenitude. Il monitoraggio dipende dal cloud Plenitude: disponibilità, accesso e frequenza dei dati dipendono dal portale e dalle sue API.</p></details>
+        <details><summary>Quali versioni di Home Assistant sono verificate?</summary><p>I test coprono Home Assistant 2025.10.4 con Python 3.13 e Home Assistant 2026.9.4 con Python 3.14, non tutte le altre versioni. È richiesto Babel 2.18.0 o successivo; in caso di conflitto con altre integrazioni, aggiorna Home Assistant. Le icone locali sono supportate da Home Assistant 2026.3.</p></details>
+        <details><summary>È già nel catalogo predefinito di HACS?</summary><p>Per l’installazione segui la procedura del repository personalizzato: inserisci <code>https://github.com/hierro1981/EniPlenitudeSolarPanels</code> in HACS e scegli il tipo Integrazione. Il pulsante “Apri in HACS” è una scorciatoia verso la tua istanza, dove HACS deve essere già configurato. I nomi dei menu possono variare.</p></details>
+        <details><summary>Il recupero ricostruisce tutta la produzione?</summary><p>Non necessariamente. Richiede un POD configurato e, per le funzioni storiche, Recorder attivo. Il servizio fornisce dati aggregati: la ripartizione per pannello può essere stimata e non sempre distingue un guasto dalla telemetria assente. Leggi la <a href="https://github.com/hierro1981/EniPlenitudeSolarPanels/blob/main/docs/recupero-produzione.md">guida al recupero</a> prima di intervenire sulle statistiche.</p></details>
+        <details><summary>Dove vengono salvati i dati di accesso?</summary><p>La configurazione e i cookie vengono salvati da Home Assistant in <code>.storage</code>, senza cifratura applicativa. Non inserirli nelle issue, negli screenshot o nei log condivisi. Questo sito è solo una pagina informativa e non richiede credenziali.</p></details>
+        <details><summary>La sessione resta valida per sempre?</summary><p>No. L’integrazione mantiene la sessione all’avvio e ogni cinque minuti, ma il portale può comunque invalidarla. Quando viene richiesta la riautenticazione, accedi di nuovo dal browser e aggiorna Cookie e User-Agent insieme.</p></details>
+      </div>
+    </section>
+    <section class="wrap closing" aria-labelledby="closing-title"><div><p class="eyebrow">Pronto a collegare il sole?</p><h2 id="closing-title">Fai spazio alla tua energia.</h2><p>Codice aperto. Documentazione a portata di mano. I tuoi pannelli, nella tua dashboard.</p></div><div class="closing-links"><a class="button button-solar" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=hierro1981&amp;repository=EniPlenitudeSolarPanels&amp;category=integration">Inizia con HACS <span aria-hidden="true">↗</span></a><a href="https://github.com/hierro1981/EniPlenitudeSolarPanels/releases">Release e aggiornamenti <span aria-hidden="true">↗</span></a></div></section>
+  </main>
+  <footer class="footer"><div class="wrap footer-row"><div><a class="footer-brand" href="https://ramaya.org/">Ramaya Software <span aria-hidden="true">↗</span></a><p>Progetti digitali indipendenti.</p><small>© 2026 Ramaya Software</small></div><nav aria-label="Link utili"><a href="https://github.com/hierro1981/EniPlenitudeSolarPanels">Codice sorgente</a><a href="https://github.com/hierro1981/EniPlenitudeSolarPanels/blob/main/custom_components/plenitude_panels/CHANGELOG.md">Changelog</a><a href="https://github.com/hierro1981/EniPlenitudeSolarPanels/issues">Segnala un problema</a><a href="privacy.html">Privacy e cookie</a></nav></div><div class="wrap legal">Plenitude Solar Panels è un progetto non ufficiale, non affiliato a Eni o Plenitude. I marchi citati appartengono ai rispettivi titolari.</div></footer>
+</body>
+</html>
