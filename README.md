@@ -13,6 +13,10 @@ associati al proprio account Plenitude, tramite le API del portale My Eni.
 Il servizio è basato sul cloud Plenitude: disponibilità, frequenza dei dati e
 accesso dipendono dal portale e dalle sue API.
 
+**Sito del prodotto:** [solar.ramaya.org](https://solar.ramaya.org/).
+File statici in `site/`, pubblicati tramite GitHub Pages;
+[manutenzione e pubblicazione del sito](docs/sito-web.md).
+
 ## Funzionalità
 
 - Un dispositivo Home Assistant per ogni pannello restituito dal portale.
