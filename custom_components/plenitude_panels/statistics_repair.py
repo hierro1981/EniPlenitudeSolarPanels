@@ -276,9 +276,14 @@ def replacement_plan(analysis, selected):
                     if stamp < start and row["sum"] is not None:
                         result[stamp] = row["sum"] + before_shift
             first = start - duration
+            retained_first = first
             if name == "short":
-                first = max(first, int(data["retention"] // duration) * duration)
-            for stamp in range(first, end, duration):
+                retained_first = max(first, int(data["retention"] // duration) * duration)
+            # Retention limits new buckets, not existing ones: purge can lag or
+            # retention may have changed since those statistics were recorded.
+            stamps = set(range(retained_first, end, duration))
+            stamps.update(stamp for stamp in existing if first <= stamp < min(retained_first, end))
+            for stamp in stamps:
                 energy = sum(value * min(3, max(0, (stamp + duration - quarter) // 300)) / 3
                              for quarter, value in desired)
                 result[stamp] = baseline + energy

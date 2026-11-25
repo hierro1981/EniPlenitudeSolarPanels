@@ -286,7 +286,10 @@ def recorder():
                     "start": datetime.fromtimestamp(stamp, UTC), "state": 100,
                     "sum": 100 if stamp >= END + 3600 else 10,
                 }, 1))
-    yield instance
+    # Keep the historical fixture within the retention window independently of
+    # the calendar date on which the test suite happens to run.
+    with patch("custom_components.plenitude_panels.statistics_repair.time", return_value=END + 86400):
+        yield instance
     engine.dispose()
 
 

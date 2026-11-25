@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.4
+
+### Fixed
+
+- Repair existing short-term statistics even when they are older than the configured retention period, without recreating already-purged old buckets. This handles delayed Recorder cleanup without rejecting an otherwise valid repair.
+- Include the Recorder timeout and reconciliation fixes from the unpublished 0.11.3 entry below.
+
 ## 0.11.3
 
 ### Fixed

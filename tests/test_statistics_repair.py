@@ -120,6 +120,26 @@ def test_negative_day_is_replaced_and_future_increments_and_raw_history_are_pres
     assert table_values(recorder, Statistics) == after
 
 
+def test_expired_but_existing_short_history_is_repaired_without_recreating_purged_buckets(recorder):
+    corrupt(recorder)
+    missing = START + 300
+    with recorder.get_session() as session:
+        session.query(StatisticsShortTerm).filter_by(metadata_id=1, start_ts=missing).delete()
+        session.commit()
+    with patch("custom_components.plenitude_panels.statistics_repair.time", return_value=END + 30 * 86400):
+        plan = replacement_plan(analysis(recorder), ["a"])
+        apply_plan(recorder, "entry", plan, 123)
+    short = {stamp: value for stamp, value, _ in table_values(recorder, StatisticsShortTerm)}
+    assert missing not in short
+    assert short[QUARTER] == pytest.approx(150450)
+    assert short[END - 300] == pytest.approx(150510)
+    assert short[END] >= short[END - 300]
+    undo_plan(recorder, "entry", {"token": 123, "plan": plan})
+    restored = {stamp: value for stamp, value, _ in table_values(recorder, StatisticsShortTerm)}
+    assert missing not in restored
+    assert restored[QUARTER] == 150420
+
+
 def test_undo_restores_original_rows_and_preserves_newly_appended_energy(recorder):
     corrupt(recorder)
     before = {name: table_values(recorder, table) for name, table in TABLES.items()}
