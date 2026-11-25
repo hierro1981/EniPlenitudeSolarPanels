@@ -262,12 +262,22 @@ class ProductionRecovery:
             return
         if self.state.get("repair_backup"):
             from .manual_repair import async_reconcile_journal
+            from .recovery_statistics import RecorderTimeoutError
 
             try:
                 await async_reconcile_journal(self.hass, self)
+            except RecorderTimeoutError as err:
+                if not getattr(self, "_repair_timeout_logged", False):
+                    _LOGGER.warning(
+                        "Statistics repair reconciliation deferred: %s; retaining pending corrections",
+                        err,
+                    )
+                    self._repair_timeout_logged = True
+                return
             except Exception:
                 _LOGGER.exception("Unable to reconcile statistics repair; retaining pending corrections")
                 return
+            self._repair_timeout_logged = False
         for record in list(self.state["pending"]):
             entity_id = self.entities.get(record["panel"])
             if entity_id is None:

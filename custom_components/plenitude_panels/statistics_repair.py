@@ -80,6 +80,9 @@ def repair_status(instance, entry_id):
         return _marker(session, instance, marker_id(entry_id), _MARKER_TIME)
 
 
+repair_status.deduplicate_recorder_read = True
+
+
 def _point(row):
     return {"start": row.start_ts, "sum": row.sum, "state": row.state} if row else None
 

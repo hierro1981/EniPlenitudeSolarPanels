@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.3
+
+### Fixed
+
+- Defer statistics repair reconciliation cleanly when Recorder is busy, such as during a backup. Reuse an outstanding status read instead of adding duplicate reads, retain pending corrections, and report whether the timed-out job was queued or running without repeated tracebacks. Debug logs include queue and execution durations.
+
 ## 0.11.2
 
 ### Fixed

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from hashlib import sha256
-from time import time
+from time import monotonic, time
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.db_schema import (
@@ -30,6 +31,14 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .recovery import day_bounds, number
+
+_LOGGER = logging.getLogger(__name__)
+_READ_JOBS = f"{DOMAIN}_recorder_read_jobs"
+_RECORDER_TIMEOUT = 30
+
+
+class RecorderTimeoutError(TimeoutError):
+    """A Recorder operation did not finish before the deadline."""
 
 
 def _fill_day(session, table, metadata_id, record, intervals, spike, counted, fallback, retention):
@@ -208,14 +217,23 @@ class _RecorderJob(RecorderTask):
         self.job = job
         self.args = args
         self.future = future
+        self.queued_at = monotonic()
+        self.started_at = None
 
     def run(self, instance) -> None:
+        self.started_at = monotonic()
         try:
             result = self.job(instance, *self.args)
         except Exception as err:  # noqa: BLE001 - propagate failures to the waiting coroutine
             instance.hass.loop.call_soon_threadsafe(self._finish, None, err)
         else:
             instance.hass.loop.call_soon_threadsafe(self._finish, result, None)
+        finally:
+            _LOGGER.debug(
+                "Recorder job %s: queued %.1fs, execution %.1fs",
+                self.job.__name__, self.started_at - self.queued_at,
+                monotonic() - self.started_at,
+            )
 
     def _finish(self, result, error) -> None:
         if self.future.done():
@@ -233,6 +251,28 @@ async def async_move_recovery(hass, entry_id, entity_id, record) -> bool:
 
 async def async_recorder_job(hass, job, *args):
     """Run a read/write operation on Recorder, including its transactional marker."""
-    future = hass.loop.create_future()
-    get_instance(hass).queue_task(_RecorderJob(job, args, future))
-    return await asyncio.wait_for(future, timeout=30)
+    # Only explicitly marked read-only jobs can share an outstanding result.
+    # Writes must retain their individual ordering and journal semantics.
+    jobs = hass.data.setdefault(_READ_JOBS, {}) if getattr(job, "deduplicate_recorder_read", False) else None
+    key = (job, args)
+    task = jobs.get(key) if jobs is not None else None
+    if task is None:
+        future = hass.loop.create_future()
+        task = _RecorderJob(job, args, future)
+        if jobs is not None:
+            jobs[key] = task
+
+            def finished(done):
+                if jobs.get(key) is task:
+                    jobs.pop(key, None)
+                if not done.cancelled():
+                    done.exception()  # Retrieve late errors even if all waiters timed out.
+
+            future.add_done_callback(finished)
+        get_instance(hass).queue_task(task)
+    try:
+        future = asyncio.shield(task.future) if jobs is not None else task.future
+        return await asyncio.wait_for(future, timeout=_RECORDER_TIMEOUT)
+    except TimeoutError as err:
+        phase = "running" if task.started_at is not None else "queued"
+        raise RecorderTimeoutError(f"Recorder job {job.__name__} timed out ({phase})") from err
