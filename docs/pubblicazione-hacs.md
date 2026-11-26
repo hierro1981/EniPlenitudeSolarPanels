@@ -14,8 +14,10 @@ Il repository è stato predisposto con:
 - workflow manuale `.github/workflows/validate.yml` per HACS Action, Hassfest,
   test e pubblicazione della release solo dopo il successo dei controlli.
 
-Questi file **non equivalgono all'accettazione nel catalogo predefinito**.
-Le validazioni remote e le impostazioni GitHub vanno verificate dopo il push.
+L'integrazione è stata accettata nel catalogo predefinito HACS con la
+[PR hacs/default #14292](https://github.com/hacs/default/pull/14292). La
+disponibilità nella ricerca dipende dai tempi di aggiornamento del catalogo.
+Le validazioni remote e le impostazioni GitHub vanno comunque verificate dopo il push.
 
 ## 1. Abilitare il download come repository personalizzato
 
@@ -31,8 +33,8 @@ Il job HACS non contiene esclusioni (`ignore`) e controlla anche i metadati
 del repository remoto. Hassfest e i test controllano il commit selezionato
 all'avvio della pubblicazione.
 
-Gli utenti potranno aggiungere il repository con tipo **Integrazione**, come
-descritto nel README. HACS usa il ramo predefinito se non esistono release;
+Gli utenti possono anche aggiungere il repository con tipo **Integrazione**, come
+alternativa alla ricerca nel catalogo descritta nel README. HACS usa il ramo predefinito se non esistono release;
 per distribuire versioni stabili è preferibile creare release GitHub.
 
 ## 2. Pubblicare una release
@@ -67,9 +69,10 @@ l'operazione a GitHub Actions.
 Non è necessario allegare ZIP personalizzati: `hacs.json` usa il layout standard
 e non dichiara `zip_release`. HACS scarica il contenuto del componente dal repository.
 
-## 3. Richiedere l'inclusione nel catalogo predefinito
+## 3. Inclusione nel catalogo predefinito
 
-Il proprietario o un contributore principale può aprire la richiesta:
+L'inclusione è stata completata con la PR indicata sopra. La procedura seguente
+rimane come riferimento per la richiesta iniziale di un'integrazione:
 
 1. Verifica l'installazione reale come repository personalizzato e i requisiti
    ufficiali aggiornati.
@@ -88,9 +91,8 @@ Per un servizio limitato all'Italia il paese deve comparire anche nel
 `hacs.json` della release: questo repository usa `"country": "IT"`.
 
 L'approvazione non è automatica: la documentazione HACS segnala che l'attesa può
-durare mesi. Dopo il merge il repository entra nella scansione programmata.
-Il download come repository personalizzato resta il percorso utilizzabile
-durante l'attesa.
+durare mesi. Dopo il merge il repository entra nella scansione programmata;
+durante l'attesa è possibile usare un repository personalizzato.
 
 ## Fonti ufficiali
 

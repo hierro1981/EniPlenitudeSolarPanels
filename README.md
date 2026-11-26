@@ -53,21 +53,19 @@ Le icone locali dell'integrazione sono supportate da Home Assistant 2026.3.
 
 ### Tramite HACS
 
-Finché il repository non sarà incluso nel catalogo predefinito, aggiungilo
-come **repository personalizzato**:
-
 1. Apri HACS in Home Assistant.
-2. Dal menu seleziona **Repository personalizzati**.
-3. Inserisci `https://github.com/hierro1981/EniPlenitudeSolarPanels` e scegli
-   il tipo **Integrazione**.
-4. Cerca **Plenitude Solar Panels**, aprilo e scaricalo.
-5. Riavvia Home Assistant.
-6. Vai in **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**
+2. Cerca **Plenitude Solar Panels**, apri la pagina dell'integrazione e scaricala.
+3. Riavvia Home Assistant.
+4. Vai in **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**
    e cerca **Plenitude Solar Panels**.
 
 Il pulsante **Apri in HACS** in cima alla pagina è una scorciatoia per aprire
 il repository nella propria istanza. I nomi dei menu possono variare tra
 versioni HACS/Marketplace.
+
+In alternativa, puoi aggiungere
+`https://github.com/hierro1981/EniPlenitudeSolarPanels` dal menu
+**Repository personalizzati**, scegliendo il tipo **Integrazione**.
 
 ### Installazione manuale
 
