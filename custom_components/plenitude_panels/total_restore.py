@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from math import isclose, isfinite
 
@@ -60,22 +59,14 @@ def state_values(state, attributes):
 
 
 def last_recorded_total(instance, entity_id):
-    """Read the last valid *raw* state, never a repaired normalized statistic."""
-    from homeassistant.components.recorder.db_schema import StateAttributes, States, StatesMeta
-    from homeassistant.helpers.recorder import session_scope
+    """Read bounded recent raw history, never a repaired normalized sum.
 
-    with session_scope(session=instance.get_session(), read_only=True) as session:
-        rows = session.query(States.state, StateAttributes.shared_attrs).join(
-            StatesMeta, States.metadata_id == StatesMeta.metadata_id,
-        ).outerjoin(StateAttributes, States.attributes_id == StateAttributes.attributes_id).filter(
-            StatesMeta.entity_id == entity_id,
-            States.state.notin_(("unavailable", "unknown", "")),
-        ).order_by(States.last_updated_ts.desc(), States.state_id.desc()).yield_per(100)
-        for state, attributes in rows:
-            try:
-                attrs = json.loads(attributes or "{}")
-            except (TypeError, ValueError):
-                continue
-            if isinstance(attrs, dict) and (values := state_values(state, attrs)) is not None:
-                return values
+    If no valid state remains in this window, defer instead of inventing zero.
+    """
+    from homeassistant.components.recorder.history import get_last_state_changes
+
+    rows = get_last_state_changes(instance.hass, 1000, entity_id).get(entity_id, [])
+    for state in reversed(rows):
+        if (values := state_values(state.state, state.attributes)) is not None:
+            return values
     return None

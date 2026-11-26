@@ -65,16 +65,16 @@
       "preview_stale": "The supply, panels or recovery ledger changed. Restart the procedure to obtain a new preview.",
       "cannot_save_recovery": "Unable to save the recovery. No new total was published; retry.",
       "repair_recorder_required": "Recorder must be enabled to repair statistics.",
-      "repair_no_statistics": "Enable the Total Production sensors and wait for their first statistics before repairing.",
+      "repair_no_statistics": "The Total Production statistics need a reliable baseline before the selected day. Enable recording or review an earlier date.",
       "repair_timezone": "Repair currently requires local day boundaries aligned with UTC hours. Select a compatible Home Assistant timezone.",
       "repair_unit": "The production statistic must use Wh, kWh or MWh.",
       "repair_invalid_statistics": "Nonfinite or invalid statistics prevent repair. Check Recorder diagnostics.",
       "repair_no_alignment": "Hourly and five-minute statistics have no common reference. Wait for a complete statistics hour and retry.",
       "repair_select_anomalous": "Select all panels with negative statistics or unapplied recovery for this date.",
-      "repair_pending": "A recovery has not been recorded/compiled yet, or belongs to another date. Wait for Recorder or repair that recovery's date first.",
+      "repair_pending": "A recovery is not yet proven recorded/compiled, has an unfinished journal, or belongs to another date. Wait for Recorder or review that recovery first; missing evidence is never guessed.",
       "repair_boundary": "A falling sum crosses the next-day boundary. Repair the next day first, then analyze this date again.",
       "repair_no_backup": "There is no completed repair to undo.",
-      "repair_undo_conflict": "Statistics or audit markers changed after repair. Undo cannot overwrite those changes; analyze the date again.",
+      "repair_undo_conflict": "The operation cannot be safely verified or undone: evidence is missing, changed or ambiguous, the backup is legacy, or undo would require deleting imported buckets. Keep the journal and backup for review; do not force a delta retry.",
       "repair_waiting": "The Recorder operation may still be running. Wait, then reopen the tool; its journal checks whether the operation committed.",
       "repair_save_failed": "The repair checkpoint could not be saved. Reopen the tool after the next heartbeat to check its journal.",
       "repair_database_error": "Recorder could not complete the database operation. Reopen the tool to reconcile its journal."
@@ -85,7 +85,7 @@
       "repair_completed": "Statistics repair completed. Refresh the Energy Dashboard. Live totals and raw sensor history were not changed. Undo last repair is available from Configure.",
       "repair_undone": "The saved statistical sums and recovery audit states were restored.",
       "repair_no_backup": "There is no completed repair to undo.",
-      "repair_undo_conflict": "Statistics or audit markers changed after repair. Analyze the date again instead of undoing those changes.",
+      "repair_undo_conflict": "The operation cannot be safely verified or undone. Keep the journal and backup for review; public APIs cannot delete individual imported buckets or safely repeat an ambiguous delta.",
       "preview_stale": "The preview changed. Reopen the procedure before applying or undoing.",
       "repair_recorder_required": "Recorder must be enabled to repair statistics.",
       "repair_waiting": "The Recorder operation may still be running. Wait, then reopen the tool to reconcile its journal.",
@@ -145,7 +145,7 @@
       },
       "repair_confirm": {
         "title": "Confirm statistics repair",
-        "description": "**Date:** {date}  \n**Aggregate production:** {aggregate} Wh  \n**Statistical rows to change:** {rows}\n\n| Panel | Current day (Wh) | Falling sums | Proposed day (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nThe selected day is rebuilt using the aggregate profile. Later normalized sums are shifted to preserve subsequent energy increments and align hourly/five-minute statistics. Live sensor totals, original state history and recovery amounts stay unchanged. Other dates with independent negative increments need their own repair.\n\nPrevious values are saved before the database transaction. Only the latest repair can be undone; applying a new repair replaces the previous checkpoint. Undo is refused if other corrections changed saved rows.",
+        "description": "**Date:** {date}  \n**Aggregate production:** {aggregate} Wh  \n**Hourly rows to change:** {rows}\n\n| Panel | Current day (Wh) | Falling sums | Proposed day (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nThe selected hourly curve is rebuilt using public Recorder APIs. Later hourly/five-minute sums are shifted to preserve subsequent increments; historical five-minute curves are not rebuilt. Live sensor totals, raw history and recovered amounts stay unchanged.\n\nThe journal is saved before separate public operations, not an atomic transaction. Interrupted work is resumed only with verified evidence; ambiguous deltas are never repeated. Only the latest repair can be undone, and only if all imported buckets already existed and saved values remain consistent. A new repair replaces the previous checkpoint.",
         "data": {"confirm": "Confirm statistics replacement", "edit_allocation": "Change panel selection instead"}
       },
       "repair_undo": {

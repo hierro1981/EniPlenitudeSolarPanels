@@ -2,24 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, localcontext
 from math import isfinite
 
 from babel import Locale, UnknownLocaleError
 from babel.numbers import format_decimal
-from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.helpers.http import current_request
-
-_LOGGER = logging.getLogger(__name__)
-_NUMBER_LOCALES = {
-    "comma_decimal": "en_US",
-    "decimal_comma": "de",
-    "space_comma": "fr",
-    "quote_decimal": "de_CH",
-    "none": "en_US",
-}
 
 
 def _browser_languages(header: str) -> list[str]:
@@ -44,7 +33,6 @@ class RecoveryFormatter:
     """Format labels only: retain full-precision numbers for all calculations."""
 
     locale: Locale
-    grouping: bool = True
 
     def number(self, value, *, precision=3) -> str:
         if value is None or not isfinite(float(value)):
@@ -55,28 +43,18 @@ class RecoveryFormatter:
             context.rounding = ROUND_HALF_UP
             return format_decimal(
                 value, format=integer_pattern + ("." + "0" * precision if precision else ""), locale=self.locale,
-                group_separator=self.grouping,
             )
 
 
-def _build_formatter(preferences: dict, browser: list[str], fallback: str) -> RecoveryFormatter:
-    mode = preferences.get("number_format", "language")
-    if not isinstance(mode, str):
-        mode = "language"
-    language = preferences.get("language")
-    candidates = (
-        [_NUMBER_LOCALES[mode]] if mode in _NUMBER_LOCALES else
-        [*browser, language, fallback] if mode == "system" else
-        [language, *browser, fallback]
-    )
-    for candidate in [*candidates, "en_US"]:
+def _build_formatter(browser: list[str], fallback: str) -> RecoveryFormatter:
+    for candidate in [*browser, fallback, "en_US"]:
         if not isinstance(candidate, str) or not candidate:
             continue
         try:
             locale = Locale.parse(candidate.replace("-", "_"))
         except (UnknownLocaleError, ValueError):
             continue
-        formatter = RecoveryFormatter(locale, grouping=mode != "none")
+        formatter = RecoveryFormatter(locale)
         # Babel lazily reads its locale data. Warm it in the executor, never on
         # Home Assistant's event loop when subsequently rendering the labels.
         formatter.number(0)
@@ -84,26 +62,13 @@ def _build_formatter(preferences: dict, browser: list[str], fallback: str) -> Re
     raise ValueError("No valid numeric locale")
 
 
-async def async_formatter(hass, context: dict) -> RecoveryFormatter:
-    """Use only the current user's frontend preferences; never another user's."""
+async def async_formatter(hass) -> RecoveryFormatter:
+    """Use the request's languages, falling back to Home Assistant's language."""
     request = current_request.get(None)
-    user = request.get(KEY_HASS_USER) if request is not None else None
-    user_id = user.id if user is not None else context.get("user_id")
-    preferences = {}
-    if user_id:
-        from homeassistant.components.frontend.storage import async_user_store
-
-        try:
-            store = await async_user_store(hass, user_id)
-            stored = store.data.get("language", {})
-            if isinstance(stored, dict):
-                preferences = stored
-        except (OSError, ValueError):
-            _LOGGER.debug("Unable to read numeric preferences; using the request/configured language")
     header = request.headers.get("Accept-Language", "") if request is not None else ""
     fallback = getattr(hass.config, "language", None) or "en"
     return await hass.async_add_executor_job(
-        _build_formatter, preferences, _browser_languages(header), fallback,
+        _build_formatter, _browser_languages(header), fallback,
     )
 
 

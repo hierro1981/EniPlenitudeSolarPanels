@@ -37,10 +37,21 @@ La baseline 2025 vincola `pycares` alla serie 4 per compatibilità con il suo
 `aiodns`; il vincolo è limitato ai test e non modifica le dipendenze runtime.
 
 I test non richiedono credenziali reali o chiamate al portale. Verificano sessioni
-browser, recupero produzione, presentazione delle anteprime e transazioni sulle
-statistiche di Recorder. Su GitHub, HACS, Hassfest e test vengono eseguiti solo
+browser, recupero produzione, presentazione delle anteprime, importazioni orarie
+e aggiustamenti pubblici di Recorder, ripresa verificata dopo crash/timeout e
+limiti dell'annullamento (nessuna eliminazione di bucket importati).
+Su GitHub, HACS, Hassfest e test vengono eseguiti solo
 all'avvio manuale del workflow **Publish release**, prima della pubblicazione.
 Per verificare modifiche durante lo sviluppo usa il comando locale riportato sopra.
+
+## Formattazione e preferenze utente
+
+Per le nuove interfacce, quando possibile, mantieni i valori numerici grezzi nel
+backend e prediligi la formattazione lato frontend tramite le API supportate di
+Home Assistant, così da rispettare le preferenze dell'utente. Non leggere
+direttamente lo storage privato di altre integrazioni per ottenere tali preferenze.
+Quando l'interfaccia standard richiede testo già formattato dal backend, usa le
+informazioni disponibili tramite API supportate e documenta eventuali limitazioni.
 
 ## Versioni
 
@@ -65,3 +76,5 @@ python tools/generate_brand.py
 
 Il generatore usa solo la libreria standard e produce `icon.png` (256×256)
 e `icon@2x.png` (512×512) nella cartella `brand/` dell'integrazione.
+La [nota originale sulle icone](brand-icons.md) è conservata fuori dalla cartella
+`brand/`, che Home Assistant riserva alle immagini riconosciute.

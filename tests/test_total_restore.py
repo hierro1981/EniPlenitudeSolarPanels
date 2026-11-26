@@ -20,10 +20,12 @@ from homeassistant.core import State
 
 from custom_components.plenitude_panels import manual_repair
 from custom_components.plenitude_panels.sensor import PlenitudePanelSensor, PlenitudeTotalProductionSensor
-from custom_components.plenitude_panels.statistics_repair import TABLES, replacement_plan
+from custom_components.plenitude_panels.statistics_repair import replacement_plan
 from custom_components.plenitude_panels.total_restore import ProductionCheckpoint, last_recorded_total
 from test_production_recovery import END
 from test_statistics_repair import analysis, corrupt, local_zone, recorder, table_values
+
+TABLES = {"hour": Statistics, "short": StatisticsShortTerm}
 
 
 def compile_sample(instance, value, stamp):
@@ -75,7 +77,7 @@ def test_repair_then_restart_with_unavailable_state_preserves_total(recorder, be
             state={"allocations": {}, "pending": [], "totals": {"a": recovered}, "last_days": {}},
             store=SimpleNamespace(async_save=AsyncMock()), entities={}, status="monitoring",
         )
-        hass = SimpleNamespace(config=SimpleNamespace(components={"recorder"}))
+        hass = recorder.hass
 
         async def execute(hass, job, *args):
             return job(recorder, *args)
@@ -214,11 +216,11 @@ def test_checkpoint_with_smaller_recovery_ledger_cannot_lower_published_total():
 
 def test_legacy_recorder_fallback_uses_latest_valid_raw_state_and_its_units(recorder):
     with recorder.get_session() as session:
-        session.add(StateAttributes(attributes_id=2, shared_attrs=json.dumps({
+        session.add(StateAttributes(attributes_id=3, shared_attrs=json.dumps({
             "unit_of_measurement": "kWh", "recovered_energy_wh": 90, "last_sample_id": 99,
         })))
         for offset, state in [(4000, "0.15"), (5000, "unavailable"), (6000, "nan")]:
-            session.add(States(metadata_id=1, attributes_id=2, state=state, last_updated_ts=END + offset))
+            session.add(States(metadata_id=1, attributes_id=3, state=state, last_updated_ts=END + offset))
         session.query(StatisticsShortTerm).update({"sum": 999999})
         session.commit()
     assert last_recorded_total(recorder, "sensor.panel_total") == (60, 90, 99)

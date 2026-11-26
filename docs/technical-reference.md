@@ -110,20 +110,24 @@ responses are retried within the seven-day window. Naive ambiguous timestamps on
 the autumn DST transition are deferred; offset-aware 23/25-hour days are supported.
 Day labels without an offset are interpreted in Home Assistant's local timezone.
 
-Recovered energy increases `Total Production`. After Recorder has recorded that
-increase and compiled its statistics, the integration moves its statistical
-contribution to the original day, spreading each quarter over its three
-five-minute statistical buckets. The Energy Dashboard's hourly sums are also
-corrected, without counting the increase again on the recovery day. Missing
-hourly buckets and a baseline are created for the requested day; five-minute
-buckets are filled only within Recorder's retention period. If the recovery
-was already part of Recorder's initial state and never counted as an increase,
-it is added to the later statistical sums as well. Raw state
-history still shows when the total was updated. Recorder must include these
-sensors for historical correction; pending corrections retry on the five-minute
-session heartbeat, including with longer panel polling intervals.
-Transactional, non-energy `plenitude_panels:recovery_audit_*` statistic markers
-make retries safe across restarts. Do not select audit markers as energy sources.
+Recovered energy increases `Total Production`, retaining the same statistic IDs.
+After Recorder records and compiles a **proven counted increase**, the integration
+imports corrected hourly sums through public `async_import_statistics`.
+The import covers completed hours before the spike hour (excluding that hour),
+creating missing hourly buckets and a baseline when a reliable reference exists.
+The final cumulative sum is unchanged. Live sampling remains five-minute; historical
+five-minute buckets are not reconstructed or rewritten by recovery.
+If an increase may already be part of Recorder's first baseline, or its raw history
+or pre-increase statistic has expired, correction stays pending rather than
+guessing. Recorder must include these sensors. Pending corrections retry on the
+five-minute session heartbeat, including with longer panel polling intervals.
+Raw state history still shows when the total changed.
+
+New journals are saved in the integration's existing Store, not Recorder markers.
+Legacy non-energy `plenitude_panels:recovery_audit_*` statistics remain read-only
+and are read through the public statistics API alongside the integration's energy
+IDs (the API suppresses state for a request containing only `has_sum=False`
+metadata). Do not select audit markers as energy sources.
 
 `Total Production` attributes expose `recovered_energy_wh`, `last_recovered_day`,
 `recovery_status` and the number of `recovery_pending_statistics` days. Turning recovery off stops new allocations, retains
@@ -182,12 +186,10 @@ New panel allocations are calculated after recipients and original energy have
 been supplied, before confirmation. A manually entered global total is not
 invented as original production for individual panels.
 
-Summary numbers use the requesting user's saved Home Assistant **number format**,
-including comma/decimal, decimal/comma, French spacing, Swiss grouping and no
-grouping. Language-based formatting uses the user's language, then browser request
-language and Home Assistant's configured language. Browser-system mode uses the
-request's `Accept-Language`, with language fallback when no request is available.
-No other user's preferences are used. Values are displayed with three decimal
+Summary numbers follow the browser request's `Accept-Language` preferences, falling
+back to Home Assistant's configured language and then English. The user's explicit
+Home Assistant number-format preference is not applied to these text summaries.
+Values are displayed with three decimal
 places; calculation precision is unchanged and the editable numeric field remains
 Home Assistant's native number control. The integration declares Babel as a
 dependency; Home Assistant installs its locale data automatically on setup.
@@ -219,7 +221,7 @@ Finite negative production API samples are treated as zero; invalid or absent
 values remain unavailable. The tool displays the number of negative aggregate
 samples encountered.
 
-The repair shifts later cumulative statistical sums to preserve subsequent
+The repair imports the selected day's **hourly** curve and shifts later cumulative statistical sums to preserve subsequent
 increments. It does not change current sensor totals, recovered-energy amounts,
 or raw sensor state history. Independent anomalies on later days require their
 own repair. Recorder must be enabled and all panels must have statistics; the POD
@@ -227,12 +229,34 @@ and aggregate API data are required. Pending recoveries must have been recorded
 and compiled; unrelated unapplied recoveries must be resolved first. Local day
 boundaries must align with UTC hours; ambiguous API timestamps are deferred.
 
-The previous values are durably saved before applying the database transaction.
-**Configure > Undo last statistics repair** restores the most recent repair,
-provided the saved rows and audit markers have not since been changed. Later
-appended statistics are adjusted to remove the repair's offset. Applying a new
-repair replaces the previous undo checkpoint. The journal resolves an interrupted
-operation on a subsequent Recorder heartbeat or when the tool is reopened.
+The repair uses public `async_import_statistics` and
+`get_instance(hass).async_adjust_statistics(statistic_id, start_time, delta, unit)`.
+The latter adjusts existing hourly and five-minute sums at/after the boundary;
+the next normal Recorder compilation continues from the corrected short-term sum.
+It does not rebuild historical five-minute curves or create short-term buckets.
+These are **separate commits**, not an atomic cross-table transaction: a partially
+completed operation can be visible until journal reconciliation finishes.
+
+Before queue submission the journal saves intent, original hourly values and
+fixed hourly/five-minute delta witnesses. The integration drains Recorder and
+reads persisted values after each public call. A restart/timeout resumes imports
+only when rows match their original or intended values; a delta already reflected
+by all witnesses is acknowledged without repetition. Submitted deltas with
+unchanged, missing or conflicting witnesses are **not resubmitted**: the public
+drain API cannot prove a task is no longer executing, and a crash can occur between
+intent storage and queue submission. Retain the journal and backup; do not clear
+storage to force retry. Concurrently appended statistics are allowed and receive
+the queue-time adjustment; changes to the preview's existing rows are rejected.
+This is conservative recovery, not a guarantee of automatic resolution of every
+interruption. Other tools changing the same statistics concurrently are unsupported.
+
+**Configure > Undo last statistics repair** restores existing hourly rows and
+reverses verified offsets when the saved evidence remains consistent. It refuses
+repairs that inserted any bucket: there is no public API to delete one imported
+hourly bucket. Later appended statistics retain their increments. Applying a new
+repair replaces the previous undo checkpoint. Legacy repair backups are preserved,
+but their private-schema undo is no longer executable. An unresolved legacy journal
+requires a backup-based/manual review rather than unsafe replay.
 
 The recovery code now refuses to apply a historical correction across falling
 cumulative sums; use Repair statistics for the affected date before retrying the
@@ -248,8 +272,9 @@ run from the repository root:
 python -m pytest tests -q
 ```
 
-The tests use Home Assistant's Recorder models with an in-memory SQLite database
-to verify historical sum adjustments, transactional rollback and replay safety.
+The tests use Home Assistant's Recorder models and real public import/adjust
+implementations with in-memory SQLite to verify hourly correction, queue-time
+advancement, compilation continuity, crash/timeout replay safety and undo limits.
 
 ## Version and changelog
 
@@ -268,8 +293,9 @@ Only live energy is restored; the current durable recovery ledger is then added,
 so new committed recoveries are retained without counting old ones twice.
 
 Legacy numeric states remain supported in Wh, kWh and MWh. If checkpoint/state
-restoration is unavailable, an operation on Recorder's queue reads the latest
-valid raw state and its attributes for that entity. Normalized statistical sums
+restoration is unavailable, a public history read in Recorder's executor searches
+the latest 1000 recorded raw states and their attributes for a valid baseline.
+An older valid value outside that bound is not used. Normalized statistical sums
 are never a restore source: repairs intentionally change those independently.
 Existing entities with no recoverable baseline, database read failures or a
 recovery ledger lower than the saved reference remain unavailable, skip sample

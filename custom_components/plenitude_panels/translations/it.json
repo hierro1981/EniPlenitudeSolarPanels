@@ -65,16 +65,16 @@
       "preview_stale": "La fornitura, i pannelli o i recuperi sono cambiati. Riavvia la procedura per ottenere una nuova anteprima.",
       "cannot_save_recovery": "Impossibile salvare il recupero. Non e' stato pubblicato un nuovo totale: riprova.",
       "repair_recorder_required": "Il Recorder deve essere abilitato per riparare le statistiche.",
-      "repair_no_statistics": "Abilita i sensori Total Production e attendi le prime statistiche prima della riparazione.",
+      "repair_no_statistics": "Serve una base statistica affidabile di Total Production precedente alla giornata selezionata. Abilita la registrazione o verifica una data precedente.",
       "repair_timezone": "La riparazione richiede giornate locali allineate alle ore UTC. Serve un fuso orario Home Assistant compatibile.",
       "repair_unit": "La statistica di produzione deve usare Wh, kWh o MWh.",
       "repair_invalid_statistics": "Statistiche non finite o non valide impediscono la riparazione. Controlla i diagnostici del Recorder.",
       "repair_no_alignment": "Le statistiche orarie e ogni cinque minuti non hanno un riferimento comune. Attendi un'ora completa di statistiche e riprova.",
       "repair_select_anomalous": "Seleziona tutti i pannelli con statistiche negative o recuperi non ancora applicati per questa data.",
-      "repair_pending": "Un recupero non e' ancora stato registrato/elaborato oppure riguarda un'altra data. Attendi il Recorder o ripara prima la data di quel recupero.",
+      "repair_pending": "Manca la prova che un recupero sia stato registrato/elaborato, il suo journal e' incompleto oppure riguarda un'altra data. Attendi Recorder o verifica prima quel recupero; i dati mancanti non vengono indovinati.",
       "repair_boundary": "Una diminuzione attraversa il confine con il giorno successivo. Ripara prima quel giorno, poi analizza nuovamente questa data.",
       "repair_no_backup": "Non ci sono riparazioni completate da annullare.",
-      "repair_undo_conflict": "Statistiche o marcatori di audit sono cambiati dopo la riparazione. L'annullamento non puo' sovrascriverli: analizza nuovamente la data.",
+      "repair_undo_conflict": "Operazione non verificabile o annullabile in sicurezza: prove mancanti, cambiate o ambigue, backup precedente oppure bucket importati da eliminare. Conserva journal e backup per una verifica; non forzare la ripetizione del delta.",
       "repair_waiting": "L'operazione del Recorder potrebbe essere ancora in corso. Attendi e riapri lo strumento: il registro verifica se e' stata completata.",
       "repair_save_failed": "Impossibile salvare il punto di ripristino. Riapri lo strumento dopo il prossimo controllo periodico per verificarne il registro.",
       "repair_database_error": "Il Recorder non ha completato l'operazione sul database. Riapri lo strumento per riconciliare il registro."
@@ -85,7 +85,7 @@
       "repair_completed": "Riparazione delle statistiche completata. Aggiorna il dashboard Energia. I totali correnti e la cronologia grezza dei sensori restano invariati. In Configura e' disponibile Annulla ultima riparazione.",
       "repair_undone": "Sono state ripristinate le somme statistiche e le condizioni di audit dei recuperi salvate.",
       "repair_no_backup": "Non ci sono riparazioni completate da annullare.",
-      "repair_undo_conflict": "Statistiche o marcatori di audit sono cambiati dopo la riparazione. Analizza nuovamente la data invece di annullare quelle modifiche.",
+      "repair_undo_conflict": "Operazione non verificabile o annullabile in sicurezza. Conserva journal e backup: le API pubbliche non eliminano singoli bucket importati e un delta ambiguo non va ripetuto.",
       "preview_stale": "L'anteprima e' cambiata. Riapri la procedura prima di applicare o annullare.",
       "repair_recorder_required": "Il Recorder deve essere abilitato per riparare le statistiche.",
       "repair_waiting": "L'operazione del Recorder potrebbe essere ancora in corso. Attendi e riapri lo strumento per riconciliare il registro.",
@@ -145,7 +145,7 @@
       },
       "repair_confirm": {
         "title": "Conferma la riparazione delle statistiche",
-        "description": "**Data:** {date}  \n**Produzione aggregata:** {aggregate} Wh  \n**Righe statistiche da modificare:** {rows}\n\n| Pannello | Giornata attuale (Wh) | Diminuzioni | Giornata proposta (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nLa giornata selezionata viene ricostruita sul profilo aggregato. Le somme normalizzate successive vengono traslate per conservare gli incrementi di energia successivi e allineare statistiche orarie e ogni cinque minuti. Totali correnti dei sensori, cronologia originale e quantita' recuperate restano invariati. Altre date con diminuzioni indipendenti richiedono una propria riparazione.\n\nI valori precedenti vengono salvati prima della transazione sul database. Si puo' annullare solo l'ultima riparazione: una nuova applicazione sostituisce il punto di ripristino precedente. L'annullamento viene rifiutato se altre correzioni hanno modificato le righe salvate.",
+        "description": "**Data:** {date}  \n**Produzione aggregata:** {aggregate} Wh  \n**Righe orarie da modificare:** {rows}\n\n| Pannello | Giornata attuale (Wh) | Diminuzioni | Giornata proposta (Wh) |\n| :--- | ---: | ---: | ---: |\n{panels}\n\nLa curva oraria viene ricostruita tramite API pubbliche di Recorder. Le somme successive orarie e di cinque minuti vengono traslate per conservarne gli incrementi; le vecchie curve di cinque minuti non vengono ricostruite. Totali live, cronologia grezza e quantita' recuperate restano invariati.\n\nIl journal viene salvato prima di operazioni pubbliche separate, non una transazione atomica. La ripresa richiede prove verificate: un delta ambiguo non viene ripetuto. Solo l'ultima riparazione puo' essere annullata, se tutti i bucket importati esistevano gia' e i valori salvati sono coerenti. Una nuova riparazione sostituisce il punto di ripristino.",
         "data": {"confirm": "Conferma la sostituzione delle statistiche", "edit_allocation": "Modifica invece la selezione dei pannelli"}
       },
       "repair_undo": {

@@ -12,8 +12,10 @@ from .const import CONF_ACCOUNT_ID, CONF_POD, CONF_SUPPLY_ID, DOMAIN
 from .manual_recovery import RecoveryError
 from .manual_recovery import async_analyze as analyze_recovery
 from .recovery import day_bounds
-from .recovery_statistics import async_recorder_job
-from .statistics_repair import apply_plan, repair_status, snapshot, undo_plan
+from .recovery_statistics import (
+    async_barrier, async_execute_journal, async_recorder_job, statistics_lock,
+)
+from .statistics_repair import snapshot, undo_journal
 
 
 def _require_recorder(hass):
@@ -64,33 +66,31 @@ def _restore_pending(recovery, records):
 
 
 async def async_reconcile_journal(hass, recovery):
-    """Resolve a crash between the atomic DB commit and the storage checkpoint."""
+    """Resume verified public calls, never infer a commit from a DB marker."""
+    async with statistics_lock(hass, recovery.entry.entry_id):
+        await _async_reconcile_journal(hass, recovery)
+
+
+async def _async_reconcile_journal(hass, recovery):
     backup = recovery.state.get("repair_backup")
     if not backup or backup["phase"] in ("failed", "undone"):
         return
     _require_recorder(hass)
-    marker = await async_recorder_job(hass, repair_status, recovery.entry.entry_id)
+    if "journal" not in backup.get("plan", {}):
+        # Preserve legacy backups, but old private-schema undo cannot be replayed.
+        if backup["phase"] == "applied":
+            return
+        raise RecoveryError("repair_undo_conflict")
     before = deepcopy(recovery.state)
     if backup["phase"] == "undo_prepared":
-        if marker == backup["plan"]["snapshot"]["marker"]:
-            backup["phase"] = "undone"
-            _restore_pending(recovery, backup["plan"]["acknowledgements"])
-        elif marker == backup["token"]:
-            backup["phase"] = "applied"
-        else:
-            raise RecoveryError("repair_undo_conflict")
-    elif marker == backup["token"]:
+        await async_execute_journal(hass, recovery, backup["undo_journal"])
+        backup["phase"] = "undone"
+        _restore_pending(recovery, backup["plan"]["acknowledgements"])
+    elif backup["phase"] == "prepared":
+        await async_execute_journal(hass, recovery, backup["plan"]["journal"])
         backup["phase"] = "applied"
         backup.pop("previous_backup", None)
         _acknowledge(recovery, backup["plan"]["acknowledgements"])
-    elif backup["phase"] == "prepared" and marker == backup["plan"]["snapshot"]["marker"]:
-        previous = backup.get("previous_backup")
-        if previous:
-            recovery.state["repair_backup"] = previous
-        else:
-            backup["phase"] = "failed"
-    else:
-        raise RecoveryError("repair_undo_conflict")
     if before != recovery.state:
         try:
             await recovery.store.async_save(recovery.state)
@@ -100,14 +100,40 @@ async def async_reconcile_journal(hass, recovery):
 
 
 async def async_apply(hass, recovery, plan):
+    async with statistics_lock(hass, recovery.entry.entry_id):
+        return await _async_apply(hass, recovery, plan)
+
+
+async def _async_apply(hass, recovery, plan):
     _require_recorder(hass)
-    await async_reconcile_journal(hass, recovery)
+    await _async_reconcile_journal(hass, recovery)
     identity = [recovery.entry.data[CONF_ACCOUNT_ID], recovery.entry.data[CONF_SUPPLY_ID]]
     if (identity != plan["identity"] or recovery.entry.data.get(CONF_POD) != plan["pod"]
         or recovery.state["allocations"].get(plan["day"], {}) != plan["prior"]):
         raise RecoveryError("preview_stale")
-    if not plan["operations"] and not plan["acknowledgements"]:
+    if not plan["journal"]["steps"] and not plan["acknowledgements"]:
         return False
+    await async_barrier(hass)
+    entities = {p: d["entity"] for p, d in plan["snapshot"]["panels"].items()}
+    fresh = await async_recorder_job(
+        hass, snapshot, recovery.entry.entry_id, entities, plan["snapshot"]["bounds"],
+        deepcopy(recovery.state["pending"]),
+    )
+    # New tail rows are allowed; existing rows, metadata and pending proofs must
+    # still match the preview. A delta affects appended rows on the public queue.
+    for panel, old in plan["snapshot"]["panels"].items():
+        new = fresh["panels"].get(panel)
+        if new is None or new["metadata"] != old["metadata"] or new["pending"] != old["pending"]:
+            raise RecoveryError("preview_stale")
+        for period in ("hour", "short"):
+            previous = {row["start"]: row for row in old[period]["rows"]}
+            current = {row["start"]: row for row in new[period]["rows"]}
+            if any(current.get(stamp) != row for stamp, row in previous.items()):
+                raise RecoveryError("preview_stale")
+            # Newly backfilled old rows also invalidate the proposed baseline.
+            latest = max(previous, default=float("inf"))
+            if any(stamp <= latest and stamp not in previous for stamp in current):
+                raise RecoveryError("preview_stale")
     before = deepcopy(recovery.state)
     backup = {
         "token": int(uuid4().hex[:13], 16), "phase": "prepared", "plan": deepcopy(plan),
@@ -120,39 +146,31 @@ async def async_apply(hass, recovery, plan):
     except Exception:
         recovery.state = before
         raise
-    try:
-        await async_recorder_job(hass, apply_plan, recovery.entry.entry_id, plan, backup["token"])
-    except TimeoutError:
-        # The queued operation may still commit. Keep the durable journal so the
-        # next heartbeat/status read can determine exactly what happened.
-        raise
-    except Exception:
-        await async_reconcile_journal(hass, recovery)
-        raise
-    await async_reconcile_journal(hass, recovery)
+    await _async_reconcile_journal(hass, recovery)
     return True
 
 
 async def async_undo(hass, recovery):
+    async with statistics_lock(hass, recovery.entry.entry_id):
+        await _async_undo(hass, recovery)
+
+
+async def _async_undo(hass, recovery):
     _require_recorder(hass)
-    await async_reconcile_journal(hass, recovery)
+    await _async_reconcile_journal(hass, recovery)
     backup = recovery.state.get("repair_backup")
     if not backup or backup["phase"] != "applied":
         raise RecoveryError("repair_no_backup")
+    if "journal" not in backup["plan"]:
+        raise RecoveryError("repair_undo_conflict")
+    backup["undo_journal"] = undo_journal(backup["plan"])
     backup["phase"] = "undo_prepared"
     try:
         await recovery.store.async_save(recovery.state)
     except Exception:
         backup["phase"] = "applied"
         raise
-    try:
-        await async_recorder_job(hass, undo_plan, recovery.entry.entry_id, backup)
-    except TimeoutError:
-        raise
-    except Exception:
-        await async_reconcile_journal(hass, recovery)
-        raise
-    await async_reconcile_journal(hass, recovery)
+    await _async_reconcile_journal(hass, recovery)
 
 
 def repair_summary(analysis, formatter, plan=None):

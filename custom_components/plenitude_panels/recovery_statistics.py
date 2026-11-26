@@ -1,278 +1,301 @@
-"""Move recorded recovery increases back in time on the Recorder's own queue.
-
-The live total is recorded normally first. Counted increases are moved backwards
-without changing the latest sum. Increases already included in Recorder's first
-baseline are added to later sums as well. Existing states remain untouched, and
-a transactional audit marker makes retry after a restart safe.
-"""
+"""Public Recorder operations with durable, verified, non-transactional journals."""
 
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
 from datetime import UTC, datetime
-from hashlib import sha256
-from time import monotonic, time
 
 from homeassistant.components.recorder import get_instance
-from homeassistant.components.recorder.db_schema import (
-    StateAttributes,
-    States,
-    StatesMeta,
-    Statistics,
-    StatisticsMeta,
-    StatisticsShortTerm,
+from homeassistant.components.recorder.history import get_significant_states
+from homeassistant.components.recorder.statistics import (
+    async_import_statistics,
+    get_metadata,
+    statistics_during_period,
 )
-from homeassistant.components.recorder.models import StatisticMeanType
-from homeassistant.components.recorder.tasks import RecorderTask
-from homeassistant.helpers.recorder import session_scope
-from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
 from .recovery import day_bounds, number
 
-_LOGGER = logging.getLogger(__name__)
-_READ_JOBS = f"{DOMAIN}_recorder_read_jobs"
 _RECORDER_TIMEOUT = 30
+_READ_JOBS = "plenitude_panels_recorder_read_jobs"
 
 
 class RecorderTimeoutError(TimeoutError):
-    """A Recorder operation did not finish before the deadline."""
+    """An operation may still be running: retain its durable journal."""
 
 
-def _fill_day(session, table, metadata_id, record, intervals, spike, counted, fallback, retention):
-    """Create only missing buckets of the requested day and its baseline."""
-    duration = 300 if table is StatisticsShortTerm else 3600
-    bounds = record.get("day_bounds") or day_bounds(
-        datetime.fromisoformat(record["day"]).date(), dt_util.get_default_time_zone(),
-    )
-    start = int(bounds[0] // duration) * duration - duration
-    end = min(int((bounds[1] + duration - 1) // duration) * duration, spike // duration * duration)
-    if table is StatisticsShortTerm:
-        start = max(start, retention // duration * duration)
-    if start >= end:
-        return
-    rows = session.query(table).filter(
-        table.metadata_id == metadata_id, table.start_ts >= start, table.start_ts < end,
-    ).order_by(table.start_ts).all()
-    existing = {int(row.start_ts): row for row in rows}
-    previous = session.query(table).filter(
-        table.metadata_id == metadata_id, table.start_ts < start, table.sum.is_not(None),
-    ).order_by(table.start_ts.desc()).first()
-    following = next((row for row in rows if row.sum is not None), None)
-    after = session.query(table).filter(
-        table.metadata_id == metadata_id, table.start_ts >= end, table.sum.is_not(None),
-    ).order_by(table.start_ts).first()
-    reference = previous or following or after
-    baseline = reference.sum if reference is not None else fallback[1] if fallback is not None else 0
-    reference_time = reference.start_ts if reference is not None else fallback[0] if fallback is not None else 0
-    if reference_time >= spike and counted:
-        baseline -= sum(value for _, value in intervals)
-    for stamp in range(start, end, duration):
-        if stamp in existing:
-            if existing[stamp].sum is not None:
-                baseline = existing[stamp].sum
-            continue
-        # Insert the unadjusted baseline. The common adjustment below adds the
-        # historical recovery to both existing and newly inserted buckets.
-        session.add(table.from_stats(metadata_id, {
-            "start": datetime.fromtimestamp(stamp, UTC), "sum": baseline,
-        }, time()))
-    session.flush()
+def utc(stamp):
+    return datetime.fromtimestamp(stamp, UTC)
 
 
-def assert_monotonic(session, table, metadata_id, start, end):
-    """Never commit a recovery across a falling normalized cumulative sum."""
-    previous = session.query(table).filter(
-        table.metadata_id == metadata_id, table.start_ts < start, table.sum.is_not(None),
-    ).order_by(table.start_ts.desc()).first()
-    rows = session.query(table).filter(
-        table.metadata_id == metadata_id, table.start_ts >= start,
-        table.start_ts <= end, table.sum.is_not(None),
-    ).order_by(table.start_ts)
-    last = previous.sum if previous else None
-    for row in rows:
-        if last is not None and row.sum < last - 1e-7:
-            raise ValueError("Falling production statistics: use Repair statistics before recovering")
-        last = row.sum
+def statistics_lock(hass, entry_id):
+    return hass.data.setdefault("plenitude_panels_statistics_locks", {}).setdefault(entry_id, asyncio.Lock())
 
 
-def _move(instance, entry_id: str, entity_id: str, record: dict) -> bool:
-    """Apply sum adjustments and their deduplication marker in one transaction."""
-    digest = sha256(f"{entry_id}:{record['panel']}".encode()).hexdigest()[:32]
-    marker_id = f"{DOMAIN}:recovery_audit_{digest}"
-    marker_time = datetime.fromisoformat(record["day"]).replace(tzinfo=UTC).timestamp()
-    with session_scope(session=instance.get_session()) as session:
-        manager = instance.statistics_meta_manager
-        metadata = manager.get_many(session, statistic_ids={entity_id, marker_id})
-        marker = None
-        if marker_id in metadata:
-            marker = session.query(Statistics).filter_by(
-                metadata_id=metadata[marker_id][0], start_ts=marker_time,
-            ).first()
-            if marker is not None and marker.state is not None and marker.state >= record["target"] - 1e-6:
-                return True
-        if entity_id not in metadata:
-            return False
-        metadata_id, meta = metadata[entity_id]
-        factor = {"Wh": 1.0, "kWh": 0.001}.get(meta["unit_of_measurement"])
-        if factor is None:
-            return False
-        # Find the actual first recorded increase, rather than assuming that
-        # publishing a state and committing it to Recorder happened together.
-        state_query = session.query(States.last_updated_ts, States.state, StateAttributes.shared_attrs).join(
-            StatesMeta, States.metadata_id == StatesMeta.metadata_id,
-        ).join(StateAttributes, States.attributes_id == StateAttributes.attributes_id).filter(
-            StatesMeta.entity_id == entity_id,
-        )
-        states = state_query.filter(States.last_updated_ts >= record["created"]).order_by(States.last_updated_ts)
-        spike = None
-        for stamp, state, attributes in states:
-            attrs = json.loads(attributes or "{}")
-            if number(state) is not None and attrs.get("recovered_energy_wh", 0) >= record["target"] - 1e-6:
-                spike = int(stamp // 300) * 300
-                break
-        if spike is None:
-            return False
-        latest = session.query(StatisticsShortTerm.start_ts).filter_by(
-            metadata_id=metadata_id,
-        ).order_by(StatisticsShortTerm.start_ts.desc()).first()
-        if latest is None or latest[0] < spike:
-            return False  # The recovery must already be in the baseline sum.
-        intervals = sorted((int(stamp), value * factor) for stamp, value in record["intervals"].items())
-        prior_stat = session.query(StatisticsShortTerm).filter(
-            StatisticsShortTerm.metadata_id == metadata_id, StatisticsShortTerm.start_ts < spike,
-            StatisticsShortTerm.state.is_not(None),
-        ).order_by(StatisticsShortTerm.start_ts.desc()).first()
-        fallback = (prior_stat.start_ts, prior_stat.sum or 0) if prior_stat is not None else None
-        counted = True
-        if prior_stat is None:
-            # If Recorder's very first baseline already contained this recovery,
-            # it did not count the increase. Add it to later sums as well instead
-            # of subtracting a spike which never existed.
-            first = session.query(StatisticsShortTerm.start_ts).filter_by(
-                metadata_id=metadata_id,
-            ).filter(StatisticsShortTerm.state.is_not(None)).order_by(StatisticsShortTerm.start_ts).first()
-            if first is None:
-                return False
-            first = first[0]
-            baseline = state_query.filter(States.last_updated_ts <= first).order_by(
-                States.last_updated_ts.desc(),
-            ).first()
-            if baseline is None or number(baseline[1]) is None:
-                baseline = next((row for row in state_query.filter(
-                    States.last_updated_ts >= first, States.last_updated_ts < first + 300,
-                ).order_by(States.last_updated_ts) if number(row[1]) is not None), None)
-            if baseline is not None:
-                attrs = json.loads(baseline[2] or "{}")
-                counted = attrs.get("recovered_energy_wh", 0) < record["target"] - 1e-6
-        retention = int(latest[0] - getattr(instance, "keep_days", 10) * 86400)
-        for table, duration in ((StatisticsShortTerm, 300), (Statistics, 3600)):
-            assert_monotonic(session, table, metadata_id, intervals[0][0] - duration, float("inf"))
-            _fill_day(session, table, metadata_id, record, intervals, spike, counted, fallback, retention)
-            cutoff = spike // duration * duration if counted else float("inf")
-            start = intervals[0][0] // duration * duration
-            rows = session.query(table).filter(
-                table.metadata_id == metadata_id,
-                table.start_ts >= start,
-                table.start_ts < cutoff,
-            ).all()
-            for row in rows:
-                if row.sum is None:
-                    continue
-                # Spread a quarter's reconstructed energy over its three
-                # five-minute buckets. Hourly sums get all completed quarters.
-                end = row.start_ts + duration
-                addition = sum(
-                    value * min(3, max(0, (end - stamp) // 300)) / 3
-                    for stamp, value in intervals
-                )
-                row.sum += addition
-            session.flush()
-            assert_monotonic(session, table, metadata_id, intervals[0][0] - duration, float("inf"))
-        audit_metadata = {
-            "statistic_id": marker_id, "source": DOMAIN,
-            "name": "Production recovery audit (not an energy source)",
-            "unit_of_measurement": "Wh",
-            "mean_type": StatisticMeanType.NONE, "has_sum": False,
-        }
-        if hasattr(StatisticsMeta, "unit_class"):
-            audit_metadata["unit_class"] = "energy"
-        _, audit_metadata_id = manager.update_or_add(session, audit_metadata, metadata)
-        if marker is not None:
-            marker.state = record["target"]
-        else:
-            session.add(Statistics.from_stats(audit_metadata_id, {
-                "start": datetime.fromtimestamp(marker_time, UTC),
-                "state": record["target"],
-            }, time()))
-    return True
-
-
-class _RecorderJob(RecorderTask):
-    """Serialize integration statistics operations with Recorder generation."""
-
-    def __init__(self, job, args, future) -> None:
-        self.job = job
-        self.args = args
-        self.future = future
-        self.queued_at = monotonic()
-        self.started_at = None
-
-    def run(self, instance) -> None:
-        self.started_at = monotonic()
-        try:
-            result = self.job(instance, *self.args)
-        except Exception as err:  # noqa: BLE001 - propagate failures to the waiting coroutine
-            instance.hass.loop.call_soon_threadsafe(self._finish, None, err)
-        else:
-            instance.hass.loop.call_soon_threadsafe(self._finish, result, None)
-        finally:
-            _LOGGER.debug(
-                "Recorder job %s: queued %.1fs, execution %.1fs",
-                self.job.__name__, self.started_at - self.queued_at,
-                monotonic() - self.started_at,
-            )
-
-    def _finish(self, result, error) -> None:
-        if self.future.done():
-            return
-        if error is not None:
-            self.future.set_exception(error)
-        else:
-            self.future.set_result(result)
-
-
-async def async_move_recovery(hass, entry_id, entity_id, record) -> bool:
-    """Wait for an atomic, replay-safe correction on the Recorder queue."""
-    return await async_recorder_job(hass, _move, entry_id, entity_id, record)
+def read_series(instance, entity, start, end=None, period="hour"):
+    """Read normalized sums and raw statistic states in their stored units."""
+    meta = metadata(instance, entity)
+    units = {"energy": meta["unit_of_measurement"]} if meta else None
+    return statistics_during_period(
+        instance.hass, utc(start), utc(end) if end is not None else None,
+        {entity}, period, units, {"sum", "state"},
+    ).get(entity, [])
 
 
 async def async_recorder_job(hass, job, *args):
-    """Run a read/write operation on Recorder, including its transactional marker."""
-    # Only explicitly marked read-only jobs can share an outstanding result.
-    # Writes must retain their individual ordering and journal semantics.
-    jobs = hass.data.setdefault(_READ_JOBS, {}) if getattr(job, "deduplicate_recorder_read", False) else None
-    key = (job, args)
-    task = jobs.get(key) if jobs is not None else None
+    """Run public read APIs in Recorder's executor, never on its write queue."""
+    jobs = hass.data.setdefault(_READ_JOBS, {})
+    # Lists/dicts are deliberately not deduplicated.
+    key = repr((job, args))
+    task = jobs.get(key)
     if task is None:
-        future = hass.loop.create_future()
-        task = _RecorderJob(job, args, future)
-        if jobs is not None:
-            jobs[key] = task
+        task = asyncio.ensure_future(get_instance(hass).async_add_executor_job(
+            job, get_instance(hass), *args,
+        ))
+        jobs[key] = task
 
-            def finished(done):
-                if jobs.get(key) is task:
-                    jobs.pop(key, None)
-                if not done.cancelled():
-                    done.exception()  # Retrieve late errors even if all waiters timed out.
+        def finished(done):
+            if jobs.get(key) is done:
+                jobs.pop(key, None)
+            if not done.cancelled():
+                done.exception()
 
-            future.add_done_callback(finished)
-        get_instance(hass).queue_task(task)
+        task.add_done_callback(finished)
     try:
-        future = asyncio.shield(task.future) if jobs is not None else task.future
-        return await asyncio.wait_for(future, timeout=_RECORDER_TIMEOUT)
+        return await asyncio.wait_for(asyncio.shield(task), _RECORDER_TIMEOUT)
     except TimeoutError as err:
-        phase = "running" if task.started_at is not None else "queued"
-        raise RecorderTimeoutError(f"Recorder job {job.__name__} timed out ({phase})") from err
+        raise RecorderTimeoutError(f"Recorder read {job.__name__} timed out") from err
+
+
+async def async_barrier(hass):
+    """Drain previously submitted public operations before inspecting witnesses."""
+    try:
+        await asyncio.wait_for(
+            asyncio.shield(get_instance(hass).async_block_till_done()), _RECORDER_TIMEOUT,
+        )
+    except TimeoutError as err:
+        raise RecorderTimeoutError("Recorder verification timed out") from err
+
+
+def same(left, right, tolerance=1e-6):
+    return left is None and right is None or (
+        left is not None and right is not None and abs(left - right) < tolerance
+    )
+
+
+def metadata(instance, entity):
+    value = get_metadata(instance.hass, statistic_ids={entity}).get(entity)
+    return dict(value[1]) if value else None
+
+
+def import_step(meta, points):
+    """Preserve each existing statistic's state when replacing its hourly sum."""
+    return {"kind": "import", "entity": meta["statistic_id"], "metadata": meta,
+            "points": points, "phase": "prepared"}
+
+
+async def async_execute_journal(hass, recovery, journal):
+    """Resume only from observed before/after values, never blindly replay a delta.
+
+    A queue barrier also covers an earlier timed-out call in this process. After
+    a restart uncommitted queue tasks no longer exist. Missing/changed witnesses
+    are a conflict, not permission to guess. Each public call is a separate commit.
+    """
+    from .manual_recovery import RecoveryError
+
+    await async_barrier(hass)
+    for step in journal["steps"]:
+        if step["phase"] == "done":
+            continue
+        entity = step["entity"]
+        current_metadata = await async_recorder_job(hass, metadata, entity)
+        if current_metadata is None or current_metadata.get("unit_of_measurement") != step.get(
+            "unit", step.get("metadata", {}).get("unit_of_measurement"),
+        ) or current_metadata.get("source") != "recorder":
+            raise RecoveryError("preview_stale")
+        tolerance = {"Wh": 1e-6, "kWh": 1e-9, "MWh": 1e-12}[current_metadata["unit_of_measurement"]]
+
+        def matches(left, right):
+            return same(left, right, tolerance)
+
+        if step["kind"] == "delta":
+            observations = []
+            for point in step["witnesses"]:
+                rows = await async_recorder_job(
+                    hass, read_series, entity, point["start"], point["start"] + 1, point["period"],
+                )
+                actual = next((row.get("sum") for row in rows if row["start"] == point["start"]), None)
+                observations.append((matches(actual, point["before"]), matches(actual, point["after"])))
+            if not observations:
+                raise RecoveryError("repair_undo_conflict")
+            if all(after for _, after in observations):
+                pass
+            elif all(before for before, _ in observations):
+                if step["phase"] != "prepared":
+                    # Recorder's drain API can report an empty queue while a
+                    # task is already executing. A previously submitted delta
+                    # with unchanged witnesses is therefore ambiguous, even
+                    # after a restart (crash may precede queue submission).
+                    # Never submit it a second time.
+                    raise RecoveryError("repair_undo_conflict")
+                # Persist intent BEFORE queueing. On timeout the next attempt
+                # drains the queue and checks the same immutable witnesses.
+                step["phase"] = "submitted"
+                await recovery.store.async_save(recovery.state)
+                get_instance(hass).async_adjust_statistics(
+                    entity, utc(step["start"]), step["delta"], step["unit"],
+                )
+                await async_barrier(hass)
+                # Re-read, do not mark done merely because queue submission worked.
+                for point in step["witnesses"]:
+                    rows = await async_recorder_job(
+                        hass, read_series, entity, point["start"], point["start"] + 1, point["period"],
+                    )
+                    if not any(row["start"] == point["start"] and matches(row.get("sum"), point["after"])
+                               for row in rows):
+                        raise RecoveryError("repair_undo_conflict")
+            else:
+                raise RecoveryError("repair_undo_conflict")
+        else:
+            points = step["points"]
+            rows = await async_recorder_job(
+                hass, read_series, entity, min(p["start"] for p in points),
+                max(p["start"] for p in points) + 3600,
+            )
+            actual = {row["start"]: row for row in rows}
+            todo = []
+            for point in points:
+                row = actual.get(point["start"])
+                value = row.get("sum") if row else None
+                if row is not None and matches(value, point["after"]) and matches(row.get("state"), point["state"]):
+                    continue
+                if ((row is not None) != point["existed"] or not matches(value, point["before"])
+                    or row is not None and not matches(row.get("state"), point["state"])):
+                    raise RecoveryError("preview_stale")
+                todo.append({"start": utc(point["start"]), "sum": point["after"], "state": point["state"]})
+            if todo:
+                await recovery.store.async_save(recovery.state)
+                async_import_statistics(hass, dict(step["metadata"]), todo)
+                await async_barrier(hass)
+            rows = await async_recorder_job(
+                hass, read_series, entity, min(p["start"] for p in points),
+                max(p["start"] for p in points) + 3600,
+            )
+            actual = {row["start"]: row for row in rows}
+            if any(p["start"] not in actual or not matches(actual[p["start"]].get("sum"), p["after"])
+                   or not matches(actual[p["start"]].get("state"), p["state"]) for p in points):
+                raise RecoveryError("repair_undo_conflict")
+        step["phase"] = "done"
+        await recovery.store.async_save(recovery.state)
+
+
+def counted_spike(instance, entity, record, meta):
+    """Identify an observed increase with a pre-existing statistic baseline."""
+    states = get_significant_states(
+        instance.hass, utc(record["created"]), entity_ids=[entity],
+        significant_changes_only=False,
+    ).get(entity, [])
+    first = next((state for state in states
+                  if state.last_updated.timestamp() >= record["created"] and number(state.state) is not None
+                  and (number(state.attributes.get("recovered_energy_wh")) or 0) >= record["target"] - 1e-6), None)
+    if first is None:
+        return None
+    previous_raw = [state for state in states
+                    if state.last_updated < first.last_updated and number(state.state) is not None
+                    and (number(state.attributes.get("recovered_energy_wh", 0)) or 0) < record["target"] - 1e-6]
+    if not previous_raw:
+        # A later live increase after raw-history purge is not evidence that the
+        # original recovery was counted. Require both sides of the raw change.
+        return None
+    spike = int(first.last_updated.timestamp() // 300) * 300
+    prior = read_series(instance, entity, 0, spike, "5minute")
+    prior = [row for row in prior if row.get("state") is not None]
+    following = read_series(instance, entity, spike, spike + 300, "5minute")
+    if not prior or not following:
+        return None
+    raw_factor = {"Wh": 1, "kWh": 1000, "MWh": 1000000}.get(first.attributes.get("unit_of_measurement"))
+    stat_factor = {"Wh": 1, "kWh": 1000, "MWh": 1000000}.get(meta["unit_of_measurement"])
+    if raw_factor is None or stat_factor is None:
+        return None
+    amount = sum(record["intervals"].values())
+    if (number(first.state) * raw_factor - prior[-1]["state"] * stat_factor < amount - 1e-6
+        or following[0].get("sum") is None or prior[-1].get("sum") is None
+        or following[0]["sum"] - prior[-1]["sum"] < amount / stat_factor - 1e-6):
+        return None
+    return spike
+
+
+def recovery_plan(instance, entity, record):
+    """Move a proven counted spike into completed earlier hourly buckets only."""
+    meta = metadata(instance, entity)
+    if not meta or meta.get("source") != "recorder":
+        return None
+    factor = {"Wh": 1, "kWh": .001, "MWh": .000001}.get(meta["unit_of_measurement"])
+    if factor is None:
+        return None
+    spike = counted_spike(instance, entity, record, meta)
+    if spike is None:
+        return None
+    spike = spike // 3600 * 3600
+    bounds = record.get("day_bounds") or day_bounds(
+        datetime.fromisoformat(record["day"]).date(), UTC,
+    )
+    start = bounds[0] - 3600
+    if start % 3600 or bounds[1] > spike:
+        return None
+    rows = read_series(instance, entity, 0)
+    prior = [r for r in rows if r["start"] < spike and r.get("sum") is not None and r.get("state") is not None]
+    following = [r for r in rows if r["start"] >= spike and r.get("sum") is not None]
+    if not prior or not following:
+        return None  # Unknown first baseline or hour not compiled yet.
+    relevant = [r for r in rows if r["start"] >= start - 3600]
+    sums = [r["sum"] for r in relevant if r.get("sum") is not None]
+    if any(b < a - 1e-6 for a, b in zip(sums, sums[1:])):
+        raise ValueError("Falling production statistics: use Repair statistics")
+    existing = {r["start"]: r for r in rows}
+    baseline_rows = [r for r in rows if r["start"] < start and r.get("sum") is not None]
+    baseline = baseline_rows[-1]["sum"] if baseline_rows else next(
+        (r["sum"] for r in rows if r["start"] < spike and r.get("sum") is not None), None,
+    )
+    if baseline is None:
+        return None
+    points = []
+    for stamp in range(start, spike, 3600):
+        row = existing.get(stamp)
+        if row and row.get("sum") is not None:
+            baseline = row["sum"]
+        addition = sum(value * factor for quarter, value in record["intervals"].items()
+                       if int(quarter) < stamp + 3600)
+        points.append({"start": stamp, "before": row.get("sum") if row else None,
+                       "state": row.get("state") if row else None, "existed": row is not None,
+                       "after": baseline + addition})
+    if points[-1]["after"] > following[0]["sum"] + 1e-6:
+        return None
+    return {"steps": [import_step(meta, points)]}
+
+
+async def async_move_recovery(hass, entry_id, entity_id, record, recovery) -> bool:
+    """Keep the journal inside the existing recovery Store until acknowledged."""
+    async with statistics_lock(hass, entry_id):
+        if record not in recovery.state["pending"]:
+            return False
+        return await _async_move_recovery(hass, entry_id, entity_id, record, recovery)
+
+
+async def _async_move_recovery(hass, entry_id, entity_id, record, recovery):
+    if "statistics_journal" not in record:
+        # Old transactional audits remain read-only and prevent a second move.
+        from .recovery_history import read_audits
+
+        audits = await async_recorder_job(hass, read_audits, entry_id, (record["panel"],), (entity_id,))
+        stamp = datetime.fromisoformat(record["day"]).replace(tzinfo=UTC).timestamp()
+        if any(t == stamp and target >= record["target"] - 1e-6
+               for t, target in audits.get(record["panel"], [])):
+            return True
+        await async_barrier(hass)
+        plan = await async_recorder_job(hass, recovery_plan, entity_id, record)
+        if plan is None:
+            return False
+        record["statistics_journal"] = plan
+        await recovery.store.async_save(recovery.state)
+    await async_execute_journal(hass, recovery, record["statistics_journal"])
+    return True

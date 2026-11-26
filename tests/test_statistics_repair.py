@@ -1,490 +1,379 @@
-"""Production-statistics repair against real Recorder models and SQLite."""
+"""Repair preview, public imports/deltas, durable retry and conservative undo."""
 
 import asyncio
+import inspect
 import json
 from copy import deepcopy
-from datetime import UTC, date, datetime, timedelta
-from itertools import pairwise
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from homeassistant.components.recorder.db_schema import Statistics, StatisticsShortTerm, States
+from homeassistant.util import dt as dt_util
 from custom_components.plenitude_panels import manual_repair
 from custom_components.plenitude_panels.config_flow import PlenitudePanelsOptionsFlow
 from custom_components.plenitude_panels.manual_recovery import RecoveryError
-from custom_components.plenitude_panels.recovery import (
-    aggregate_intervals,
-    day_bounds,
-    production,
+from custom_components.plenitude_panels.recovery import aggregate_intervals, day_bounds
+from custom_components.plenitude_panels.recovery_statistics import async_execute_journal
+from custom_components.plenitude_panels.statistics_repair import replacement_plan, snapshot
+from test_production_recovery import (
+    DAY, END, QUARTER, ROME, START, owner, record, values,
 )
-from custom_components.plenitude_panels.recovery_statistics import _move
-from custom_components.plenitude_panels.statistics_repair import (
-    TABLES,
-    apply_plan,
-    repair_status,
-    replacement_plan,
-    snapshot,
-    undo_plan,
-)
-from homeassistant.components.recorder.db_schema import (
-    States,
-    Statistics,
-    StatisticsMeta,
-    StatisticsShortTerm,
-)
-from homeassistant.components.recorder.models import StatisticMeanType
-from homeassistant.components.recorder.statistics import statistics_during_period
-from test_production_recovery import DAY, END, QUARTER, ROME, START
 from test_production_recovery import recorder as recorder_fixture
 
 recorder = recorder_fixture
-
-
-def analysis(instance, *, day=DAY, aggregate=None, pending=(), prior=None, entities=None):
-    bounds = day_bounds(day, ROME)
-    if aggregate is None:
-        aggregate = {stamp: 90.0 if stamp == bounds[0] + 12 * 3600 else 0.0
-                     for stamp in range(*bounds, 900)}
-    entities = entities or {"a": "sensor.panel_total"}
-    return {
-        "day": day.isoformat(), "identity": ["account", "supply"], "pod": "POD",
-        "panels": {panel: {"power": 400, "position": panel} for panel in entities},
-        "aggregate": aggregate, "prior": prior or {},
-        "snapshot": snapshot(instance, "entry", entities, bounds, pending),
-    }
-
-
-def table_values(instance, table):
-    with instance.get_session() as session:
-        return [(row.start_ts, row.sum, row.state) for row in session.query(table).filter_by(
-            metadata_id=1,
-        ).order_by(table.start_ts)]
-
-
-def corrupt(instance, baseline=150420.0):
-    with instance.get_session() as session:
-        for table, duration in ((Statistics, 3600), (StatisticsShortTerm, 300)):
-            session.add(table.from_stats(1, {
-                "start": datetime.fromtimestamp(START - duration, UTC), "sum": baseline, "state": 100,
-            }, 1))
-            session.query(table).filter(table.start_ts < START + 17 * 3600, table.start_ts >= START).update({"sum": baseline})
-        session.commit()
+TABLES = {"hour": Statistics, "short": StatisticsShortTerm}
 
 
 @pytest.fixture(autouse=True)
 def local_zone():
-    from homeassistant.util import dt as dt_util
-
     previous = dt_util.get_default_time_zone()
     dt_util.set_default_time_zone(ROME)
     yield
     dt_util.set_default_time_zone(previous)
 
 
-def test_user_october_3_payload_and_negative_samples():
-    payload = json.loads((Path(__file__).parent / "fixtures" / "2026-10-03.json").read_text(encoding="utf-8"))
-    values = aggregate_intervals(payload, date(2026, 10, 3), ROME)
-    assert len(values) == 96
-    assert sum(values.values()) == pytest.approx(5993.56)
-    payload["energyProducedConsumed"][0]["energyProduced"] = "-1.234,56"
-    assert sum(aggregate_intervals(payload, date(2026, 10, 3), ROME).values()) == pytest.approx(5993.56)
-    assert production("-1,00") == 0
-    assert production("-inf") is None
-    assert production(None) is None
-    assert production("nan") is None
+def analysis(instance, *, day=DAY, aggregate=None, pending=(), prior=None, entities=None):
+    bounds = day_bounds(day, ROME)
+    return {
+        "day": day.isoformat(), "identity": ["account", "supply"], "pod": "POD",
+        "panels": {p: {"power": 400, "position": p} for p in (entities or {"a": ""})},
+        "aggregate": aggregate if aggregate is not None else {
+            stamp: 90. if stamp == bounds[0] + 12 * 3600 else 0. for stamp in range(*bounds, 900)},
+        "prior": prior or {},
+        "snapshot": snapshot(instance, "entry", entities or {"a": "sensor.panel_total"}, bounds, pending),
+    }
 
 
-def test_negative_day_is_replaced_and_future_increments_and_raw_history_are_preserved(recorder):
-    corrupt(recorder)
-    before = table_values(recorder, Statistics)
-    with recorder.get_session() as session:
-        raw = [(row.state, row.last_updated_ts, row.attributes_id) for row in session.query(States)]
-    inspected = analysis(recorder)
-    assert inspected["snapshot"]["panels"]["a"]["hour"]["total"] == -150410
-    plan = replacement_plan(inspected, ["a"])
-    apply_plan(recorder, "entry", plan, 123)
-    after = table_values(recorder, Statistics)
-    sums = {stamp: value for stamp, value, _ in after}
-    assert sums[END - 3600] - sums[START - 3600] == pytest.approx(90)
-    old_future = [(stamp, value) for stamp, value, _ in before if stamp >= END]
-    new_future = [(stamp, value) for stamp, value, _ in after if stamp >= END]
-    assert [b[1] - a[1] for a, b in pairwise(old_future)] == pytest.approx(
-        [b[1] - a[1] for a, b in pairwise(new_future)],
-    )
-    with recorder.get_session() as session:
-        assert [(row.state, row.last_updated_ts, row.attributes_id) for row in session.query(States)] == raw
-    assert repair_status(recorder, "entry") == 123
-    assert replacement_plan(analysis(recorder), ["a"])["operations"] == []
-    apply_plan(recorder, "entry", plan, 123)  # Same transaction token cannot apply twice.
-    assert table_values(recorder, Statistics) == after
+def table_values(instance, table):
+    with instance.get_session() as session:
+        return [(r.start_ts, r.sum, r.state) for r in session.query(table).filter_by(metadata_id=1).order_by(table.start_ts)]
 
 
-def test_expired_but_existing_short_history_is_repaired_without_recreating_purged_buckets(recorder):
-    corrupt(recorder)
-    missing = START + 300
-    with recorder.get_session() as session:
-        session.query(StatisticsShortTerm).filter_by(metadata_id=1, start_ts=missing).delete()
-        session.commit()
-    with patch("custom_components.plenitude_panels.statistics_repair.time", return_value=END + 30 * 86400):
-        plan = replacement_plan(analysis(recorder), ["a"])
-        apply_plan(recorder, "entry", plan, 123)
-    short = {stamp: value for stamp, value, _ in table_values(recorder, StatisticsShortTerm)}
-    assert missing not in short
-    assert short[QUARTER] == pytest.approx(150450)
-    assert short[END - 300] == pytest.approx(150510)
-    assert short[END] >= short[END - 300]
-    undo_plan(recorder, "entry", {"token": 123, "plan": plan})
-    restored = {stamp: value for stamp, value, _ in table_values(recorder, StatisticsShortTerm)}
-    assert missing not in restored
-    assert restored[QUARTER] == 150420
-
-
-def test_undo_restores_original_rows_and_preserves_newly_appended_energy(recorder):
-    corrupt(recorder)
-    before = {name: table_values(recorder, table) for name, table in TABLES.items()}
-    plan = replacement_plan(analysis(recorder), ["a"])
-    apply_plan(recorder, "entry", plan, 123)
-    with recorder.get_session() as session:
-        for name, table in TABLES.items():
-            duration = 3600 if name == "hour" else 300
-            last = table_values(recorder, table)[-1]
-            session.add(table.from_stats(1, {
-                "start": datetime.fromtimestamp(last[0] + duration, UTC), "sum": last[1] + 5, "state": 105,
-            }, 1))
-        session.commit()
-    undo_plan(recorder, "entry", {"token": 123, "plan": plan})
-    for name, table in TABLES.items():
-        after = table_values(recorder, table)
-        assert after[:-1] == before[name]
-        assert after[-1][1] == pytest.approx(before[name][-1][1] + 5)
-    undo_plan(recorder, "entry", {"token": 123, "plan": plan})
-    assert repair_status(recorder, "entry") is None
-
-
-def test_stale_preview_and_undo_conflict_do_not_overwrite_changes(recorder):
-    plan = replacement_plan(analysis(recorder), ["a"])
-    with recorder.get_session() as session:
-        session.query(Statistics).filter_by(metadata_id=1, start_ts=START).update({"sum": 12})
-        session.commit()
-    with pytest.raises(RecoveryError, match="preview_stale"):
-        apply_plan(recorder, "entry", plan, 123)
-    fresh = replacement_plan(analysis(recorder), ["a"])
-    apply_plan(recorder, "entry", fresh, 123)
-    with recorder.get_session() as session:
-        session.query(Statistics).filter_by(metadata_id=1, start_ts=QUARTER).update({"sum": 999})
-        session.commit()
-    current = table_values(recorder, Statistics)
-    with pytest.raises(RecoveryError, match="repair_undo_conflict"):
-        undo_plan(recorder, "entry", {"token": 123, "plan": fresh})
-    assert table_values(recorder, Statistics) == current
-
-
-def test_failed_transaction_restores_every_modified_sum(recorder):
-    corrupt(recorder)
-    plan = replacement_plan(analysis(recorder), ["a"])
-    before = table_values(recorder, Statistics)
-    with (
-        patch("custom_components.plenitude_panels.statistics_repair._set_marker", side_effect=RuntimeError("failure")),
-        pytest.raises(RuntimeError, match="failure"),
-    ):
-        apply_plan(recorder, "entry", plan, 123)
-    assert table_values(recorder, Statistics) == before
-
-
-def test_compiled_pending_recovery_is_acknowledged_without_double_energy(recorder):
-    corrupt(recorder)
-    pending = {"panel": "a", "day": DAY.isoformat(), "created": END + 3600,
-               "target": 90, "intervals": {str(QUARTER): 90}}
-    plan = replacement_plan(analysis(recorder, pending=[pending], prior={"a": {"total": 90}}), ["a"])
-    apply_plan(recorder, "entry", plan, 123)
-    sums = {stamp: value for stamp, value, _ in table_values(recorder, Statistics)}
-    assert sums[END - 3600] - sums[START - 3600] == pytest.approx(90)
-    assert sums[END + 3600] - sums[END] == pytest.approx(0)
-    assert _move(recorder, "entry", "sensor.panel_total", pending)  # Already audited: no second move.
-    undo_plan(recorder, "entry", {"token": 123, "plan": plan})
-    assert table_values(recorder, Statistics)[-1][1] == 100
-
-
-def test_uncompiled_or_other_date_pending_recovery_is_not_guessed(recorder):
-    pending = {"panel": "a", "day": DAY.isoformat(), "created": END + 3600,
-               "target": 999, "intervals": {str(QUARTER): 90}}
-    with pytest.raises(RecoveryError, match="repair_pending"):
-        replacement_plan(analysis(recorder, pending=[pending]), ["a"])
-    pending["day"] = "2026-10-30"
-    with pytest.raises(RecoveryError, match="repair_pending"):
-        replacement_plan(analysis(recorder, pending=[pending]), ["a"])
-
-
-def test_new_recovery_rejects_existing_negative_statistics(recorder):
-    corrupt(recorder)
-    before = table_values(recorder, Statistics)
-    record = {"panel": "a", "day": DAY.isoformat(), "created": END + 3600,
-              "target": 90, "intervals": {str(QUARTER): 90}}
-    with pytest.raises(ValueError, match="Repair statistics"):
-        _move(recorder, "entry", "sensor.panel_total", record)
-    assert table_values(recorder, Statistics) == before
-
-
-def test_old_gap_uses_nearest_following_sum_not_distant_current_baseline(recorder):
-    old_day = date(2026, 10, 3)
-    old_start, old_end = day_bounds(old_day, ROME)
-    with recorder.get_session() as session:
+def corrupt(instance, baseline=150420.):
+    with instance.get_session() as session:
         for table in TABLES.values():
-            session.query(table).filter(table.start_ts < END + 3600).update({"sum": 100000})
-            session.query(table).filter(table.start_ts >= END + 3600).update({"sum": 100090})
-        session.add(Statistics.from_stats(1, {"start": datetime.fromtimestamp(old_end, UTC), "sum": 5}, 1))
+            session.query(table).filter(table.start_ts < START + 17 * 3600).update({"sum": baseline})
         session.commit()
-    record = {"panel": "a", "day": old_day.isoformat(), "created": END + 3600,
-              "target": 90, "intervals": {str(old_start + 12 * 3600): 90}}
-    assert _move(recorder, "entry", "sensor.panel_total", record)
-    sums = {stamp: value for stamp, value, _ in table_values(recorder, Statistics)}
-    assert sums[old_start] == 5
-    assert sums[old_end - 3600] == 95
-    assert sums[old_end] == 95
 
 
-def test_journal_reconciles_commit_after_restart_and_can_undo(recorder):
+def test_negative_api_samples_and_real_october_payload():
+    data = json.loads((Path(__file__).parent / "fixtures" / "2026-10-03.json").read_text())
+    from datetime import date
+    assert sum(aggregate_intervals(data, date(2026, 10, 3), ROME).values()) == pytest.approx(5993.56)
+    data["energyProducedConsumed"][0]["energyProduced"] = "-1.234,56"
+    assert sum(aggregate_intervals(data, date(2026, 10, 3), ROME).values()) == pytest.approx(5993.56)
+
+
+def test_repair_and_undo_preserve_raw_states_future_increments_and_next_compile(recorder):
+    async def run():
+        corrupt(recorder)
+        recovery = owner(recorder)
+        original = {name: table_values(recorder, table) for name, table in TABLES.items()}
+        with recorder.get_session() as session:
+            raw = [(r.state, r.last_updated_ts) for r in session.query(States)]
+        plan = replacement_plan(analysis(recorder), ["a"])
+        await manual_repair.async_apply(recorder.hass, recovery, plan)
+        sums = values(recorder)
+        assert sums[END - 3600] - sums[START - 3600] == pytest.approx(90)
+        assert len(recorder.adjustments) == 1
+        # No rewriting of historical short buckets; only public future offset.
+        short = values(recorder, StatisticsShortTerm)
+        assert short[QUARTER] == dict((s, v) for s, v, _ in original["short"])[QUARTER]
+        with recorder.get_session() as session:
+            assert [(r.state, r.last_updated_ts) for r in session.query(States)] == raw
+        from test_total_restore import compile_sample
+        compiled = compile_sample(recorder, 105, END + 7200)
+        assert compiled["sum"] == pytest.approx(short[END + 6900] + 5)
+        await manual_repair.async_undo(recorder.hass, recovery)
+        assert {name: table_values(recorder, table) for name, table in TABLES.items()} == original
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("crash", ["after_delta", "after_import"])
+def test_crash_between_public_commit_and_store_checkpoint_never_repeats_delta(recorder, crash):
+    async def run():
+        corrupt(recorder)
+        recovery = owner(recorder)
+        plan = replacement_plan(analysis(recorder), ["a"])
+        checkpoint = {}
+        async def save(state):
+            checkpoint.clear()
+            checkpoint.update(deepcopy(state))
+            journal = state.get("repair_backup", {}).get("plan", {}).get("journal", {})
+            done = sum(s["phase"] == "done" for s in journal.get("steps", []))
+            if done == (1 if crash == "after_delta" else 2):
+                # Model process death: persisted journal still says prepared for
+                # the just-committed call.
+                checkpoint["repair_backup"]["plan"]["journal"]["steps"][done - 1]["phase"] = (
+                    "submitted" if crash == "after_delta" else "prepared"
+                )
+                raise OSError("crash")
+        recovery.store.async_save.side_effect = save
+        with pytest.raises(OSError):
+            await manual_repair.async_apply(recorder.hass, recovery, plan)
+        recovery.state = json.loads(json.dumps(checkpoint))
+        recovery.store.async_save.side_effect = None
+        await manual_repair.async_reconcile_journal(recorder.hass, recovery)
+        assert len(recorder.adjustments) == 1
+        assert recovery.state["repair_backup"]["phase"] == "applied"
+        assert values(recorder)[END - 3600] == pytest.approx(150510)
+    asyncio.run(run())
+
+
+def test_queued_delta_timeout_then_retry_drains_before_witness_check(recorder):
+    async def run():
+        corrupt(recorder)
+        recovery = owner(recorder)
+        plan = replacement_plan(analysis(recorder), ["a"])
+        queue = []
+        real_adjust = recorder.async_adjust_statistics
+        recorder.async_adjust_statistics = lambda *args: queue.append(args)
+        barriers = 0
+        async def drain():
+            nonlocal barriers
+            barriers += 1
+            if queue:
+                # First post-submit barrier times out, without cancelling task.
+                if barriers == 3:
+                    raise TimeoutError
+                real_adjust(*queue.pop())
+        recorder.async_block_till_done.side_effect = drain
+        with pytest.raises(TimeoutError):
+            await manual_repair.async_apply(recorder.hass, recovery, plan)
+        await manual_repair.async_reconcile_journal(recorder.hass, recovery)
+        assert len(recorder.adjustments) == 1
+        assert not queue
+    asyncio.run(run())
+
+
+def test_missing_witness_or_external_changes_block_retry(recorder):
+    async def run():
+        corrupt(recorder)
+        recovery = owner(recorder)
+        plan = replacement_plan(analysis(recorder), ["a"])
+        step = plan["journal"]["steps"][0]
+        with recorder.get_session() as session:
+            session.query(StatisticsShortTerm).filter_by(start_ts=step["witnesses"][1]["start"]).update({"sum": 12345})
+            session.commit()
+        with pytest.raises(RecoveryError, match="repair_undo_conflict"):
+            await async_execute_journal(recorder.hass, recovery, plan["journal"])
+        assert not recorder.adjustments
+    asyncio.run(run())
+
+
+def test_crash_after_intent_before_submission_does_not_guess_or_resubmit(recorder):
+    async def run():
+        corrupt(recorder)
+        recovery = owner(recorder)
+        journal = replacement_plan(analysis(recorder), ["a"])["journal"]
+        # This durable state is indistinguishable from a still-running delta.
+        journal["steps"][0]["phase"] = "submitted"
+        with pytest.raises(RecoveryError, match="repair_undo_conflict"):
+            await async_execute_journal(recorder.hass, recovery, journal)
+        assert not recorder.adjustments
+    asyncio.run(run())
+
+
+def test_purged_witness_blocks_ambiguous_delta_without_repetition(recorder):
+    async def run():
+        corrupt(recorder)
+        recovery = owner(recorder)
+        journal = replacement_plan(analysis(recorder), ["a"])["journal"]
+        step = journal["steps"][0]
+        step["phase"] = "submitted"
+        with recorder.get_session() as session:
+            session.query(StatisticsShortTerm).filter_by(start_ts=step["witnesses"][1]["start"]).delete()
+            session.commit()
+        with pytest.raises(RecoveryError, match="repair_undo_conflict"):
+            await async_execute_journal(recorder.hass, recovery, journal)
+        assert not recorder.adjustments
+    asyncio.run(run())
+
+
+def test_misaligned_future_short_and_hour_endpoints_are_not_silently_repaired(recorder):
+    corrupt(recorder)
+    with recorder.get_session() as session:
+        session.query(StatisticsShortTerm).filter_by(start_ts=END + 6900).update({"sum": 101})
+        session.commit()
+    with pytest.raises(RecoveryError, match="repair_no_alignment"):
+        replacement_plan(analysis(recorder), ["a"])
+
+
+@pytest.mark.parametrize("unit,factor", [("kWh", .001), ("MWh", .000001)])
+def test_repair_and_undo_use_stored_energy_units_without_scaling_twice(recorder, unit, factor):
+    async def run():
+        corrupt(recorder)
+        with recorder.get_session() as session:
+            for table in TABLES.values():
+                for row in session.query(table):
+                    row.sum *= factor
+                    row.state *= factor
+            update = recorder.statistics_meta_manager.update_unit_of_measurement
+            args = [session, "sensor.panel_total"]
+            if "new_unit_class" in inspect.signature(update).parameters:
+                args.append("energy")
+            update(*args, unit)
+            session.commit()
+        recovery = owner(recorder)
+        before = values(recorder)
+        await manual_repair.async_apply(recorder.hass, recovery, replacement_plan(analysis(recorder), ["a"]))
+        after = values(recorder)
+        assert (after[END - 3600] - after[START - 3600]) / factor == pytest.approx(90)
+        assert recorder.adjustments[0][3] == unit
+        await manual_repair.async_undo(recorder.hass, recovery)
+        assert values(recorder) == pytest.approx(before)
+    asyncio.run(run())
+
+
+def test_appended_rows_are_adjusted_once_and_retained_on_undo(recorder):
+    async def run():
+        corrupt(recorder)
+        recovery = owner(recorder)
+        plan = replacement_plan(analysis(recorder), ["a"])
+        with recorder.get_session() as session:
+            for table in TABLES.values():
+                session.add(table.from_stats(1, {"start": datetime.fromtimestamp(END + 7200, UTC),
+                                                "sum": 105, "state": 105}, 1))
+            session.commit()
+        await manual_repair.async_apply(recorder.hass, recovery, plan)
+        offset = recorder.adjustments[0][2]
+        assert values(recorder)[END + 7200] == pytest.approx(105 + offset)
+        await manual_repair.async_undo(recorder.hass, recovery)
+        assert values(recorder)[END + 7200] == pytest.approx(105)
+    asyncio.run(run())
+
+
+def test_missing_hour_can_be_imported_but_not_undone_by_deleting_a_bucket(recorder):
+    async def run():
+        corrupt(recorder)
+        with recorder.get_session() as session:
+            session.query(Statistics).filter_by(start_ts=QUARTER).delete()
+            session.commit()
+        recovery = owner(recorder)
+        await manual_repair.async_apply(recorder.hass, recovery, replacement_plan(analysis(recorder), ["a"]))
+        with pytest.raises(RecoveryError, match="repair_undo_conflict"):
+            await manual_repair.async_undo(recorder.hass, recovery)
+        assert QUARTER in values(recorder)
+        assert recovery.state["repair_backup"]["phase"] == "applied"
+    asyncio.run(run())
+
+
+def test_stale_preview_is_rejected_before_journal_or_mutation(recorder):
     async def run():
         corrupt(recorder)
         plan = replacement_plan(analysis(recorder), ["a"])
-        state = {"allocations": {}, "pending": [], "totals": {"a": 1000}}
-        recovery = SimpleNamespace(
-            entry=SimpleNamespace(entry_id="entry", data={"account_id": "account", "supply_id": "supply", "pod": "POD"}),
-            state=state, store=SimpleNamespace(async_save=AsyncMock()),
-        )
-        hass = SimpleNamespace(config=SimpleNamespace(components={"recorder"}))
-
-        async def execute(hass, job, *args):
-            return job(recorder, *args)
-
-        with patch.object(manual_repair, "async_recorder_job", execute):
-            await manual_repair.async_apply(hass, recovery, plan)
-            backup = deepcopy(recovery.state["repair_backup"])
-            backup["phase"] = "prepared"  # Simulate a crash after the DB commit.
-            recovery.state["repair_backup"] = json.loads(json.dumps(backup))
-            await manual_repair.async_reconcile_journal(hass, recovery)
-            assert recovery.state["repair_backup"]["phase"] == "applied"
-            assert recovery.state["totals"] == {"a": 1000}
-            await manual_repair.async_undo(hass, recovery)
-            assert recovery.state["repair_backup"]["phase"] == "undone"
-            assert recovery.state["totals"] == {"a": 1000}
-    asyncio.run(run())
-
-
-def test_backup_write_failure_does_not_touch_database(recorder):
-    async def run():
-        plan = replacement_plan(analysis(recorder), ["a"])
-        original = {"allocations": {}, "pending": [], "totals": {}}
-        recovery = SimpleNamespace(
-            state=deepcopy(original),
-            entry=SimpleNamespace(entry_id="entry", data={"account_id": "account", "supply_id": "supply", "pod": "POD"}),
-            store=SimpleNamespace(async_save=AsyncMock(side_effect=OSError("disk"))),
-        )
-        hass = SimpleNamespace(config=SimpleNamespace(components={"recorder"}))
-        job = AsyncMock()
-        with (
-            patch.object(manual_repair, "async_recorder_job", job),
-            pytest.raises(OSError),
-        ):
-            await manual_repair.async_apply(hass, recovery, plan)
-        job.assert_not_awaited()
-        assert recovery.state == original
-    asyncio.run(run())
-
-
-def test_october_3_repair_matches_api_and_energy_dashboard_across_purged_short_history(recorder):
-    day = date(2026, 10, 3)
-    start, end = day_bounds(day, ROME)
-    payload = json.loads((Path(__file__).parent / "fixtures" / "2026-10-03.json").read_text(encoding="utf-8"))
-    aggregate = aggregate_intervals(payload, day, ROME)
-    with recorder.get_session() as session:
-        session.add(Statistics.from_stats(1, {"start": datetime.fromtimestamp(start - 3600, UTC), "sum": 150420}, 1))
-        for stamp in range(start, end, 3600):
-            session.add(Statistics.from_stats(1, {
-                "start": datetime.fromtimestamp(stamp, UTC), "sum": 150420 if stamp < start + 17 * 3600 else 10,
-            }, 1))
-        session.commit()
-    plan = replacement_plan(analysis(recorder, day=day, aggregate=aggregate), ["a"])
-    apply_plan(recorder, "entry", plan, 123)
-    changes = statistics_during_period(
-        recorder.hass, datetime.fromtimestamp(start, UTC), datetime.fromtimestamp(end, UTC) - timedelta(microseconds=1),
-        {"sensor.panel_total"}, "day", {"energy": "Wh"}, {"change"},
-    )
-    assert sum(row["change"] for row in changes["sensor.panel_total"]) == pytest.approx(5993.56)
-    with recorder.get_session() as session:
-        assert not session.query(StatisticsShortTerm).filter(StatisticsShortTerm.start_ts < START).count()
-    hourly = table_values(recorder, Statistics)
-    short = table_values(recorder, StatisticsShortTerm)
-    assert hourly[-1][1] == short[-1][1]
-
-
-def add_panel(instance, entity, unit):
-    factor = {"Wh": 1, "kWh": 1000}[unit]
-    with instance.get_session() as session:
-        meta = {
-            "statistic_id": entity, "source": "recorder", "name": None,
-            "unit_of_measurement": unit, "has_sum": True, "mean_type": StatisticMeanType.NONE,
-        }
-        if hasattr(StatisticsMeta, "unit_class"):
-            meta["unit_class"] = "energy"
-        _, metadata_id = instance.statistics_meta_manager.update_or_add(session, meta, {})
-        for table in TABLES.values():
-            for row in session.query(table).filter_by(metadata_id=1):
-                session.add(table.from_stats(metadata_id, {
-                    "start": datetime.fromtimestamp(row.start_ts, UTC),
-                    "sum": row.sum / factor if row.sum is not None else None,
-                    "state": row.state / factor if row.state is not None else None,
-                }, 1))
-        session.commit()
-    return metadata_id
-
-
-def test_multiple_panels_mixed_units_and_existing_recoveries_are_respected(recorder):
-    add_panel(recorder, "sensor.b", "kWh")
-    add_panel(recorder, "sensor.c", "Wh")
-    data = analysis(recorder, entities={"a": "sensor.panel_total", "b": "sensor.b", "c": "sensor.c"},
-                    prior={"a": {"total": 20}, "b": {"total": 10}})
-    data["aggregate"] = {stamp: value * 10 for stamp, value in data["aggregate"].items()}
-    data["panels"] = {"a": {"power": 400}, "b": {"power": 600}, "c": {"power": 1000}}
-    plan = replacement_plan(data, ["a", "b", "c"])
-    assert sum(plan["targets"].values()) == pytest.approx(900)
-    assert plan["targets"]["a"] == pytest.approx(194)
-    assert plan["targets"]["b"] == pytest.approx(271)
-    assert plan["targets"]["c"] == pytest.approx(435)
-    apply_plan(recorder, "entry", plan, 123)
-    totals = statistics_during_period(
-        recorder.hass, datetime.fromtimestamp(START, UTC), datetime.fromtimestamp(END, UTC) - timedelta(microseconds=1),
-        {"sensor.panel_total", "sensor.b", "sensor.c"}, "day", {"energy": "Wh"}, {"change"},
-    )
-    assert sum(row["change"] for rows in totals.values() for row in rows) == pytest.approx(900)
-
-
-def test_repair_suggests_both_a_positive_spike_and_negative_production(recorder):
-    async def run():
-        second = add_panel(recorder, "sensor.b", "kWh")
         with recorder.get_session() as session:
-            session.query(Statistics).filter_by(metadata_id=1, start_ts=END - 3600).update({"sum": 54908.271})
-            session.query(Statistics).filter_by(metadata_id=second, start_ts=END - 3600).update({"sum": -1.410378})
+            session.query(Statistics).filter_by(start_ts=QUARTER).update({"sum": 999})
             session.commit()
-        panels = {"a": {"power": 0.9}, "b": {"power": 0.9}}
-        recovery = SimpleNamespace(
-            entry=SimpleNamespace(entry_id="entry", unique_id="account_supply"),
-            state={"pending": []}, entities={"a": "sensor.panel_total", "b": "sensor.b"},
-        )
-        hass = SimpleNamespace(config=SimpleNamespace(components={"recorder"}))
-
-        async def execute(hass, job, *args):
-            return job(recorder, *args)
-
-        with (
-            patch.object(manual_repair, "analyze_recovery", AsyncMock(return_value={
-                "aggregate": {QUARTER: 3301.350}, "panels": panels,
-            })),
-            patch.object(manual_repair.er, "async_get", return_value=SimpleNamespace()),
-            patch.object(manual_repair, "async_recorder_job", execute),
-        ):
-            inspected = await manual_repair.async_analyze(hass, recovery, panels, DAY)
-        assert inspected["suggested_repair"] == ["a", "b"]
+        recovery = owner(recorder)
+        with pytest.raises(RecoveryError, match="preview_stale"):
+            await manual_repair.async_apply(recorder.hass, recovery, plan)
+        assert "repair_backup" not in recovery.state
+        assert not recorder.adjustments
     asyncio.run(run())
 
 
-def test_pending_initial_baseline_is_not_subtracted_as_if_it_were_counted(recorder):
-    with recorder.get_session() as session:
-        for table in TABLES.values():
-            session.query(table).filter(table.start_ts < END + 3600).delete()
-            session.query(table).update({"sum": 0})
-        session.commit()
-    pending = {"panel": "a", "day": DAY.isoformat(), "created": END + 3600,
-               "target": 90, "intervals": {str(QUARTER): 90}}
-    plan = replacement_plan(analysis(recorder, pending=[pending], prior={"a": {"total": 90}}), ["a"])
-    apply_plan(recorder, "entry", plan, 123)
-    sums = {stamp: value for stamp, value, _ in table_values(recorder, Statistics)}
-    assert sums[END - 3600] == pytest.approx(90)
-    assert sums[END + 3600] == pytest.approx(90)
-
-
-def test_failed_new_repair_keeps_previous_undo_checkpoint(recorder):
+def test_failed_initial_journal_save_does_not_submit_public_writes(recorder):
     async def run():
-        recovery = SimpleNamespace(
-            entry=SimpleNamespace(entry_id="entry", data={"account_id": "account", "supply_id": "supply", "pod": "POD"}),
-            state={"allocations": {}, "pending": [], "totals": {}}, store=SimpleNamespace(async_save=AsyncMock()),
-        )
-        hass = SimpleNamespace(config=SimpleNamespace(components={"recorder"}))
-
-        async def execute(hass, job, *args):
-            return job(recorder, *args)
-
-        with patch.object(manual_repair, "async_recorder_job", execute):
-            await manual_repair.async_apply(hass, recovery, replacement_plan(analysis(recorder), ["a"]))
-            first = deepcopy(recovery.state["repair_backup"])
-            assert not await manual_repair.async_apply(hass, recovery, replacement_plan(analysis(recorder), ["a"]))
-            assert recovery.state["repair_backup"] == first
-            next_data = analysis(recorder)
-            next_data["aggregate"][QUARTER] = 100
-            next_plan = replacement_plan(next_data, ["a"])
-            with patch.object(manual_repair, "apply_plan", side_effect=RuntimeError("failure")), pytest.raises(RuntimeError):
-                await manual_repair.async_apply(hass, recovery, next_plan)
-            assert recovery.state["repair_backup"] == first
+        corrupt(recorder)
+        recovery = owner(recorder)
+        recovery.store.async_save.side_effect = OSError("disk full")
+        before = values(recorder)
+        with pytest.raises(OSError):
+            await manual_repair.async_apply(recorder.hass, recovery, replacement_plan(analysis(recorder), ["a"]))
+        assert values(recorder) == before
+        assert not recorder.adjustments
+        assert "repair_backup" not in recovery.state
     asyncio.run(run())
 
 
-def test_unselected_panel_change_invalidates_preview(recorder):
-    second = add_panel(recorder, "sensor.b", "Wh")
-    data = analysis(recorder, entities={"a": "sensor.panel_total", "b": "sensor.b"})
-    data["aggregate"][QUARTER] = 200
-    plan = replacement_plan(data, ["a"])
-    before = table_values(recorder, Statistics)
+def test_zero_aggregate_can_explicitly_repair_a_day_to_zero(recorder):
+    async def run():
+        corrupt(recorder)
+        aggregate = {stamp: 0 for stamp in range(START, END, 900)}
+        recovery = owner(recorder)
+        await manual_repair.async_apply(
+            recorder.hass, recovery, replacement_plan(analysis(recorder, aggregate=aggregate), ["a"]),
+        )
+        sums = values(recorder)
+        assert sums[END - 3600] == sums[START - 3600]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("day_text,hours", [("2026-03-29", 23), ("2026-10-25", 25)])
+def test_repair_uses_local_dst_day_bounds_without_fixed_24_hour_assumptions(recorder, day_text, hours):
+    from datetime import date
+
+    async def run():
+        day = date.fromisoformat(day_text)
+        start, end = day_bounds(day, ROME)
+        with recorder.get_session() as session:
+            for table, duration in ((Statistics, 3600), (StatisticsShortTerm, 300)):
+                session.query(table).delete()
+                for stamp in range(start - duration, end + 7200, duration):
+                    session.add(table.from_stats(1, {
+                        "start": datetime.fromtimestamp(stamp, UTC), "state": 100,
+                        "sum": 100 if stamp >= end else 10,
+                    }, 1))
+            session.commit()
+        recovery = owner(recorder)
+        plan = replacement_plan(analysis(recorder, day=day), ["a"])
+        assert end - start == hours * 3600
+        await manual_repair.async_apply(recorder.hass, recovery, plan)
+        sums = values(recorder)
+        assert sums[end - 3600] - sums[start - 3600] == pytest.approx(90)
+    asyncio.run(run())
+
+
+def test_pending_counted_recovery_is_removed_once_and_acknowledged(recorder):
+    async def run():
+        pending = record()
+        recovery = owner(recorder, [pending])
+        plan = replacement_plan(analysis(recorder, pending=[pending]), ["a"])
+        await manual_repair.async_apply(recorder.hass, recovery, plan)
+        assert not recovery.state["pending"]
+        sums = values(recorder)
+        assert sums[END - 3600] - sums[START - 3600] == pytest.approx(90)
+        assert sums[END + 3600] == pytest.approx(100)
+        assert len(recorder.adjustments) == 2
+        await manual_repair.async_reconcile_journal(recorder.hass, recovery)
+        assert len(recorder.adjustments) == 2
+    asyncio.run(run())
+
+
+def test_no_first_baseline_or_ambiguous_pending_is_not_guessed(recorder):
     with recorder.get_session() as session:
-        session.query(Statistics).filter_by(metadata_id=second, start_ts=QUARTER).update({"sum": 11})
+        session.query(Statistics).filter(Statistics.start_ts < START).delete()
         session.commit()
-    with pytest.raises(RecoveryError, match="preview_stale"):
-        apply_plan(recorder, "entry", plan, 123)
-    assert table_values(recorder, Statistics) == before
+    with pytest.raises(RecoveryError, match="repair_no_statistics"):
+        replacement_plan(analysis(recorder), ["a"])
 
 
-def test_repair_wizard_preview_confirmation_and_undo(recorder):
+def test_repair_wizard_requires_preview_and_explicit_confirmation(recorder):
     async def run():
         corrupt(recorder)
         inspected = analysis(recorder)
-        inspected["suggested_repair"] = ["a"]
-        inspected["negative_api_samples"] = 0
-        backup = {"token": 123, "day": DAY.isoformat()}
+        inspected.update(suggested_repair=["a"], negative_api_samples=0)
         coordinator = SimpleNamespace(
-            recovery=SimpleNamespace(state={"repair_backup": {"phase": "applied"}}),
+            recovery=SimpleNamespace(state={}),
             async_analyze_statistics=AsyncMock(return_value=inspected),
             async_repair_statistics=AsyncMock(),
-            async_repair_backup=AsyncMock(return_value=backup),
-            async_undo_statistics=AsyncMock(),
         )
         flow = PlenitudePanelsOptionsFlow(SimpleNamespace(entry_id="entry", data={}))
         flow.hass = SimpleNamespace(
             data={"plenitude_panels": {"entry": coordinator}}, config=SimpleNamespace(language="en"),
             async_add_executor_job=AsyncMock(side_effect=lambda func, *args: func(*args)),
         )
-        menu = await flow.async_step_init()
-        assert "repair_date" in menu["menu_options"] and "repair_undo" in menu["menu_options"]
-        targets = await flow.async_step_repair_date({"date": DAY.isoformat()})
-        assert targets["step_id"] == "repair_targets"
-        assert targets["data_schema"]({})["panels"] == ["a"]
+        await flow.async_step_repair_date({"date": DAY.isoformat()})
         preview = await flow.async_step_repair_targets({"panels": ["a"]})
         assert preview["step_id"] == "repair_confirm"
-        assert "90.000" in preview["description_placeholders"]["panels"]
         coordinator.async_repair_statistics.assert_not_awaited()
         denied = await flow.async_step_repair_confirm({"confirm": False})
         assert denied["errors"]["base"] == "confirmation_required"
-        edited = await flow.async_step_repair_confirm({"edit_allocation": True})
-        assert edited["step_id"] == "repair_targets"
-        await flow.async_step_repair_targets({"panels": ["a"]})
-        done = await flow.async_step_repair_confirm({"confirm": True})
-        assert done["reason"] == "repair_completed"
+        result = await flow.async_step_repair_confirm({"confirm": True})
+        assert result["reason"] == "repair_completed"
         coordinator.async_repair_statistics.assert_awaited_once()
-        undo = await flow.async_step_repair_undo()
-        assert undo["description_placeholders"]["date"] == DAY.isoformat()
-        denied = await flow.async_step_repair_undo({"confirm": False})
-        assert denied["errors"]["base"] == "confirmation_required"
-        coordinator.async_undo_statistics.assert_not_awaited()
-        done = await flow.async_step_repair_undo({"confirm": True})
-        assert done["reason"] == "repair_undone"
-        coordinator.async_undo_statistics.assert_awaited_once_with(123)
     asyncio.run(run())

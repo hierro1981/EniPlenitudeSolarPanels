@@ -297,7 +297,7 @@ class PlenitudePanelsOptionsFlow(config_entries.OptionsFlow):
             if known_default is not None
             else vol.Required("known_energy_wh", default=None)
         )
-        formatter = await async_formatter(self.hass, self.context)
+        formatter = await async_formatter(self.hass)
         presentation = self._plan if self._plan is not None else self._analysis
         return self.async_show_form(
             step_id="recovery_targets",
@@ -342,7 +342,7 @@ class PlenitudePanelsOptionsFlow(config_entries.OptionsFlow):
                     self._plan = None
                     return await self.async_step_recovery_done()
         plan = self._plan
-        formatter = await async_formatter(self.hass, self.context)
+        formatter = await async_formatter(self.hass)
         return self.async_show_form(
             step_id="recovery_confirm",
             data_schema=vol.Schema({
@@ -488,7 +488,7 @@ class PlenitudePanelsOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_repair_confirm()
         analysis = self._repair_analysis
         default = (user_input or {}).get("panels", self._repair_plan["selected"] if self._repair_plan else analysis["suggested_repair"])
-        formatter = await async_formatter(self.hass, self.context)
+        formatter = await async_formatter(self.hass)
         return self.async_show_form(
             step_id="repair_targets", errors=errors,
             data_schema=vol.Schema({vol.Required("panels", default=default): SelectSelector(
@@ -529,7 +529,7 @@ class PlenitudePanelsOptionsFlow(config_entries.OptionsFlow):
                     self._repair_plan = None
                     self._repair_analysis = None
                     return self.async_abort(reason="repair_completed")
-        formatter = await async_formatter(self.hass, self.context)
+        formatter = await async_formatter(self.hass)
         return self.async_show_form(
             step_id="repair_confirm", errors=errors,
             data_schema=vol.Schema({

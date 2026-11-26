@@ -285,7 +285,7 @@ class ProductionRecovery:
             try:
                 from .recovery_statistics import async_move_recovery
 
-                done = await async_move_recovery(self.hass, self.entry.entry_id, entity_id, record)
+                done = await async_move_recovery(self.hass, self.entry.entry_id, entity_id, record, self)
             except Exception:  # Recorder failures must not interrupt live production.
                 _LOGGER.exception("Unable to correct recovered production statistics")
                 continue

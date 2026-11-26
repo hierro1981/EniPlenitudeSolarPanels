@@ -1,8 +1,7 @@
-"""Profile-aware numeric formatting and readable per-panel recovery previews."""
+"""Locale-aware numeric formatting and readable per-panel recovery previews."""
 
 import asyncio
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,34 +14,22 @@ from custom_components.plenitude_panels.recovery_presentation import (
 from homeassistant.helpers.http import current_request
 
 
-@pytest.fixture
-def user_store_module(monkeypatch):
-    """Isolate profile storage I/O from unrelated frontend/onboarding platforms."""
-    module = ModuleType("homeassistant.components.frontend.storage")
-    monkeypatch.setitem(sys.modules, module.__name__, module)
-    return module
-
-
-@pytest.mark.parametrize("preferences,browser,fallback,expected", [
-    ({"language": "it"}, [], "en", "6.973,750"),
-    ({"language": "en"}, [], "it", "6,973.750"),
-    ({"language": "fr"}, [], "it", "6\u202f973,750"),
-    ({"language": "en", "number_format": "decimal_comma"}, [], "en", "6.973,750"),
-    ({"language": "it", "number_format": "comma_decimal"}, [], "it", "6,973.750"),
-    ({"language": "en", "number_format": "space_comma"}, [], "en", "6\u202f973,750"),
-    ({"language": "it", "number_format": "quote_decimal"}, [], "it", "6\u2019973.750"),
-    ({"language": "it", "number_format": "none"}, [], "it", "6973.750"),
-    ({"language": "it", "number_format": "system"}, ["en-US"], "it", "6,973.750"),
-    ({"language": "not-a-locale"}, [], "it", "6.973,750"),
-    ({}, ["it-IT"], "en", "6.973,750"),
-    ({}, [], "fr", "6\u202f973,750"),
+@pytest.mark.parametrize("browser,fallback,expected", [
+    (["it"], "en", "6.973,750"),
+    (["en"], "it", "6,973.750"),
+    (["fr"], "it", "6\u202f973,750"),
+    (["de-CH"], "it", "6\u2019973.750"),
+    (["not-a-locale", "en-US"], "it", "6,973.750"),
+    (["not-a-locale"], "it", "6.973,750"),
+    ([], "fr", "6\u202f973,750"),
+    ([], "not-a-locale", "6,973.750"),
 ])
-def test_number_preferences_override_interface_language(preferences, browser, fallback, expected):
-    assert _build_formatter(preferences, browser, fallback).number(6973.75) == expected
+def test_number_locale_uses_browser_then_configured_language(browser, fallback, expected):
+    assert _build_formatter(browser, fallback).number(6973.75) == expected
 
 
 def test_grouping_rounding_and_unavailable_values():
-    formatter = _build_formatter({"language": "en-IN"}, [], "en")
+    formatter = _build_formatter(["en-IN"], "en")
     assert formatter.number(1234567.89) == "12,34,567.890"
     assert formatter.number(1.2345) == "1.235"  # Intl's default half-expand rounding.
     assert formatter.number(None) == "—"
@@ -54,45 +41,36 @@ def test_browser_language_quality_order():
     assert _browser_languages("en-US;q=0.5,it-IT;q=1,fr;q=0,*;q=0.8,de;q=oops") == ["it-IT", "en-US"]
 
 
-def test_current_http_user_profile_is_used_without_context_user_id(user_store_module):
+def test_request_language_is_used():
     async def run():
         class Request(dict):
             pass
 
-        request = Request(hass_user=SimpleNamespace(id="current_user"))
-        request.headers = {"Accept-Language": "en-US,en;q=0.9"}
+        request = Request()
+        request.headers = {"Accept-Language": "en-US;q=0.5,fr-FR;q=0.9"}
         hass = SimpleNamespace(
             config=SimpleNamespace(language="en"),
             async_add_executor_job=AsyncMock(side_effect=lambda func, *args: func(*args)),
         )
-        store = SimpleNamespace(data={"language": {"language": "en", "number_format": "decimal_comma"}})
-        load = user_store_module.async_user_store = AsyncMock(return_value=store)
         token = current_request.set(request)
         try:
-            formatter = await async_formatter(hass, {})
-            assert formatter.number(6973.75) == "6.973,750"
-            load.assert_awaited_once_with(hass, "current_user")
+            formatter = await async_formatter(hass)
+            assert formatter.number(6973.75) == "6\u202f973,750"
         finally:
             current_request.reset(token)
         hass.async_add_executor_job.assert_awaited_once()
     asyncio.run(run())
 
 
-def test_profile_unavailable_uses_browser_language_without_failing_flow(user_store_module):
+def test_no_request_uses_configured_language():
     async def run():
-        class Request(dict):
-            pass
-
-        request = Request(hass_user=SimpleNamespace(id="current_user"))
-        request.headers = {"Accept-Language": "fr-FR,en;q=0.8"}
         hass = SimpleNamespace(
-            config=SimpleNamespace(language="en"),
+            config=SimpleNamespace(language="fr"),
             async_add_executor_job=AsyncMock(side_effect=lambda func, *args: func(*args)),
         )
-        user_store_module.async_user_store = AsyncMock(side_effect=OSError)
-        token = current_request.set(request)
+        token = current_request.set(None)
         try:
-            formatter = await async_formatter(hass, {})
+            formatter = await async_formatter(hass)
             assert formatter.number(6973.75) == "6\u202f973,750"
         finally:
             current_request.reset(token)
@@ -111,7 +89,7 @@ def test_summary_distinguishes_zero_partial_unknown_and_allocation():
             "d": {"value": None, "observed": None},
         },
     }
-    formatter = _build_formatter({"language": "it"}, [], "en")
+    formatter = _build_formatter(["it"], "en")
     result = summary(data, formatter)
     assert result["aggregate"] == "6.973,750"
     assert result["known"] == "≥ 3.540,000"

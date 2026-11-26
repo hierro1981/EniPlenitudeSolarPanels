@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.12.0
+
+### Changed
+
+- Recover production through Home Assistant's public hourly statistics import API, keeping the existing Total Production IDs and live five-minute sampling. A proven counted recovery is redistributed only before its spike hour, preserving the final sum; ambiguous initial baselines and unavailable history remain pending.
+- Repair selected daily hourly curves only after an explicit preview and confirmation. Public sum adjustments preserve future increments and subsequent five-minute/hourly compilation without rewriting sensor states or synthesizing historical short-term buckets.
+- Replace custom Recorder tasks, private-schema access and database audit writes with public history/statistics reads and a durable integration Store journal. Persisted witnesses verify each delta and hourly import after timeout/restart; conflicting, purged or ambiguous evidence blocks replay rather than applying a delta twice. Operations are separate public commits, not one atomic transaction.
+- Preserve legacy recovery ledgers and read legacy audits without modifying them. Legacy repair backups remain stored but cannot use the removed private-schema undo path.
+- Undo restores existing hourly buckets and reverses verified offsets only when possible through public APIs. Repairs that inserted missing hourly buckets cannot be undone because no public API deletes individual buckets. Legacy raw-state fallback searches the latest 1000 recorded states and otherwise defers safely.
+
+## 0.11.6
+
+### Fixed
+
+- Avoid reading frontend user storage when formatting recovery summaries. Numbers now follow the browser's requested language, falling back to the Home Assistant language, rather than the user's explicit number-format preference.
+
+## 0.11.5
+
+### Fixed
+
+- Move the icon documentation outside the integration's brand image directory to avoid a Hassfest warning.
+
 ## 0.11.4
 
 ### Fixed

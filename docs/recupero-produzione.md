@@ -65,11 +65,17 @@ Dopo che Recorder ha registrato e compilato l'aumento, la correzione sposta il
 contributo statistico sulla giornata originale. L'aggiornamento della dashboard
 può quindi richiedere ulteriore tempo e un successivo ciclo di cinque minuti.
 La cronologia degli stati grezzi continua a mostrare quando il totale è cambiato.
+Il campionamento live resta ogni cinque minuti e gli ID `Total Production` non
+cambiano. La correzione storica importa **solo somme orarie**, tramite API
+pubbliche, prima dell'ora del picco ed escludendola: la somma finale resta uguale.
+Non ricostruisce i vecchi intervalli statistici di cinque minuti. Se manca la
+prova che Recorder abbia conteggiato l'aumento (per esempio nella prima base
+statistica o dopo la cancellazione della cronologia), il recupero resta pendente.
 
 Gli attributi del sensore espongono `live_energy_wh`, `recovered_energy_wh`, `last_recovered_day`,
-`recovery_status` e `recovery_pending_statistics`. I marcatori
-`plenitude_panels:recovery_audit_*` servono a rendere i tentativi ripetibili;
-non sono sorgenti da selezionare nella dashboard Energia.
+`recovery_status` e `recovery_pending_statistics`. I nuovi journal restano nello
+storage dell'integrazione. I vecchi marcatori `plenitude_panels:recovery_audit_*`
+vengono conservati e letti senza modificarli; non selezionarli nella dashboard Energia.
 
 Disabilitare il recupero automatico ferma nuove assegnazioni automatiche,
 conserva quelle già applicate e consente di completarne le correzioni statistiche.
@@ -89,12 +95,15 @@ La selezione suggerisce anche i pannelli il cui totale positivo supera l'intero
 aggregato API del giorno. Controlla comunque tutti i pannelli: il suggerimento
 non identifica ogni possibile anomalia.
 
-La riparazione **sostituisce le curve statistiche giornaliere** dei pannelli
+La riparazione **sostituisce le curve statistiche orarie giornaliere** dei pannelli
 selezionati con un profilo stimato dall'aggregato, ripartito per potenza nominale.
 Conserva i totali validi dei pannelli non selezionati e considera i recuperi
 precedenti dei selezionati. Sposta le somme successive per preservarne gli
 incrementi. Non cambia totali live, energia recuperata o cronologia degli stati
 grezzi. Anomalie indipendenti in altre giornate richiedono interventi separati.
+La traslazione successiva usa l'API pubblica di aggiustamento di Home Assistant
+su somme orarie e di cinque minuti; la normale compilazione successiva continua
+dalla somma corretta. Non vengono creati o ricostruiti bucket storici di cinque minuti.
 
 Servono statistiche per tutti i pannelli e recuperi pendenti già registrati e
 compilati; recuperi pendenti di altre date devono essere risolti. I confini del
@@ -108,8 +117,9 @@ Dalla versione **0.11.2**, `Total Production` salva un checkpoint nativo con quo
 live, riferimento al recupero e ultimo campione conteggiato, anche se lo stato
 pubblicato è `unavailable`. La riparazione e il suo annullamento non modificano
 questo checkpoint. Per i salvataggi precedenti senza checkpoint viene usato lo
-stato numerico ripristinato oppure, se indisponibile, l'ultimo stato grezzo valido
-di Recorder. Le somme statistiche corrette non vengono usate come contatore live.
+stato numerico ripristinato oppure, se indisponibile, uno stato grezzo valido tra
+gli ultimi 1000 di Recorder, letto tramite API pubblica. Le somme statistiche
+corrette non vengono usate come contatore live.
 
 Se esiste un vecchio contatore ma non è disponibile una base coerente (oppure il
 registro dei recuperi è inferiore al riferimento salvato), il sensore resta
@@ -132,14 +142,24 @@ compilazione delle statistiche e verifica la continuità anche dopo un riavvio.
 
 ## Annullare l'ultima riparazione
 
-**Configura > Annulla ultima riparazione statistiche** ripristina i valori salvati
-prima dell'ultima riparazione, se righe e marcatori non sono stati modificati
-nel frattempo. Le statistiche aggiunte successivamente sono adeguate per togliere
-l'offset della riparazione. Una nuova riparazione sostituisce il punto di ripristino.
-Il journal persistente riconcilia operazioni interrotte al successivo heartbeat
-Recorder o alla riapertura dello strumento.
+**Configura > Annulla ultima riparazione statistiche** ripristina i valori delle
+righe orarie già esistenti e gli offset verificabili, se non sono stati alterati.
+Non è possibile annullare una riparazione che ha importato bucket mancanti:
+le API pubbliche non consentono di eliminarli singolarmente. Anche i vecchi
+backup di riparazione restano conservati, ma non sono annullabili con il precedente
+percorso privato. Le statistiche aggiunte successivamente mantengono i loro incrementi.
+Una nuova riparazione sostituisce il punto di ripristino.
 
-Per dettagli su retention, migrazione dei registri precedenti e transazioni,
+Il journal viene salvato prima di ogni operazione e i risultati vengono riletti
+da Recorder. Importazioni e aggiustamenti sono commit separati, **non una
+transazione atomica**: durante un'interruzione possono apparire risultati parziali.
+Dopo timeout o riavvio un delta già verificato non viene ripetuto; dati cancellati,
+conflitti o un invio dall'esito ancora ambiguo bloccano il tentativo anziché rischiare
+un doppio aggiustamento. Non cancellare il journal per forzare una ripetizione:
+conserva backup e storage per una verifica manuale. Evita correzioni concorrenti
+degli stessi ID con altri strumenti.
+
+Per dettagli su migrazione dei registri precedenti e ripresa verificata,
 consulta il [riferimento tecnico](technical-reference.md).
 ## Protezione delle nuove letture anomale
 

@@ -1,393 +1,172 @@
-"""Transactional snapshots, replacement plans and undo for production statistics.
-
-Only normalized sums are replaced. Sensor states, live counters and recovery
-amounts are never rewritten. All operations run on Recorder's serialized queue.
-"""
+"""Hourly replacement previews and public-API-only undo plans."""
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
-from hashlib import sha256
 from math import isfinite
-from time import time
 
-from homeassistant.components.recorder.db_schema import (
-    StateAttributes,
-    States,
-    StatesMeta,
-    Statistics,
-    StatisticsMeta,
-    StatisticsShortTerm,
-)
-from homeassistant.components.recorder.models import StatisticMeanType
-from homeassistant.helpers.recorder import session_scope
-
-from .const import DOMAIN
 from .manual_recovery import RecoveryError
 from .recovery import number
-
-TABLES = {"hour": Statistics, "short": StatisticsShortTerm}
-_MARKER_TIME = datetime(2000, 1, 1, tzinfo=UTC).timestamp()
-
-
-def marker_id(entry_id):
-    return f"{DOMAIN}:repair_audit_{sha256(entry_id.encode()).hexdigest()[:32]}"
+from .recovery_history import read_audits
+from .recovery_statistics import counted_spike, import_step, metadata, read_series
 
 
-def recovery_marker(entry_id, panel):
-    digest = sha256(f"{entry_id}:{panel}".encode()).hexdigest()[:32]
-    return f"{DOMAIN}:recovery_audit_{digest}"
-
-
-def _metadata(session, instance, statistic_id):
-    return instance.statistics_meta_manager.get_many(session, statistic_ids={statistic_id}).get(statistic_id)
-
-
-def _marker(session, instance, statistic_id, stamp):
-    meta = _metadata(session, instance, statistic_id)
-    row = session.query(Statistics).filter_by(metadata_id=meta[0], start_ts=stamp).first() if meta else None
-    return row.state if row is not None else None
-
-
-def _set_marker(session, instance, statistic_id, stamp, value):
-    meta = _metadata(session, instance, statistic_id)
-    if meta is None:
-        data = {
-            "statistic_id": statistic_id, "source": DOMAIN,
-            "name": "Statistics repair audit (not an energy source)",
-            "unit_of_measurement": None, "mean_type": StatisticMeanType.NONE, "has_sum": False,
-        }
-        if hasattr(StatisticsMeta, "unit_class"):
-            data["unit_class"] = None
-        _, metadata_id = instance.statistics_meta_manager.update_or_add(session, data, {})
-    else:
-        metadata_id = meta[0]
-    row = session.query(Statistics).filter_by(metadata_id=metadata_id, start_ts=stamp).first()
-    if value is None:
-        if row is not None:
-            session.delete(row)
-    elif row is not None:
-        row.state = value
-    else:
-        session.add(Statistics.from_stats(metadata_id, {
-            "start": datetime.fromtimestamp(stamp, UTC), "state": value,
-        }, time()))
-
-
-def repair_status(instance, entry_id):
-    with session_scope(session=instance.get_session(), read_only=True) as session:
-        return _marker(session, instance, marker_id(entry_id), _MARKER_TIME)
-
-
-repair_status.deduplicate_recorder_read = True
-
-
-def _point(row):
-    return {"start": row.start_ts, "sum": row.sum, "state": row.state} if row else None
-
-
-def _series(session, table, metadata_id, start, end, all_rows=False):
-    query = session.query(table).filter(table.metadata_id == metadata_id)
-    anchor = query.filter(table.start_ts < start, table.sum.is_not(None)).order_by(table.start_ts.desc()).first()
-    rows = query.order_by(table.start_ts).all() if all_rows else query.filter(
-        table.start_ts >= start - 3600,
-    ).order_by(table.start_ts).all()
-    baseline = anchor.sum if anchor else 0.0
-    day_rows = [row for row in rows if start <= row.start_ts < end and row.sum is not None]
-    last = day_rows[-1].sum if day_rows else baseline
-    previous = baseline
-    negative = []
+def _series(rows, start, end):
+    anchors = [row for row in rows if row["start"] < start and row.get("sum") is not None]
+    anchor = anchors[-1] if anchors else None
+    baseline = anchor["sum"] if anchor else None
+    # Only the latest earlier reference influences this preview. Do not retain
+    # the entity's entire pre-day lifetime in the durable backup.
+    rows = ([anchor] if anchor else []) + [r for r in rows if r["start"] >= start]
+    day = [row for row in rows if start <= row["start"] < end and row.get("sum") is not None]
+    last = day[-1]["sum"] if day else baseline
+    previous, negative = baseline, []
     for row in rows:
-        if row.start_ts < start or row.sum is None:
+        if row["start"] < start or row.get("sum") is None:
             continue
-        if row.sum < previous - 1e-7:
-            negative.append(row.start_ts)
-        previous = row.sum
-        if row.start_ts >= end:
-            break  # Include the join to the next day, not unrelated later days.
-    if not isfinite(baseline) or not isfinite(last):
-        raise RecoveryError("repair_invalid_statistics")
-    return {
-        "anchor": _point(anchor), "rows": [_point(row) for row in rows],
-        "baseline": baseline, "end_sum": last, "total": last - baseline,
-        "negative": negative, "has_day": bool(day_rows),
-    }
-
-
-def _pending_increase(session, entity, metadata_id, record):
-    """Describe a recorded recovery without moving any historical sum."""
-    query = session.query(States.last_updated_ts, States.state, StateAttributes.shared_attrs).join(
-        StatesMeta, States.metadata_id == StatesMeta.metadata_id,
-    ).join(StateAttributes, States.attributes_id == StateAttributes.attributes_id).filter(StatesMeta.entity_id == entity)
-    first = next((row for row in query.filter(States.last_updated_ts >= record["created"]).order_by(
-        States.last_updated_ts,
-    ) if number(row[1]) is not None and json.loads(row[2] or "{}").get(
-        "recovered_energy_wh", 0,
-    ) >= record["target"] - 1e-6), None)
-    if first is None:
-        return None
-    spike = int(first[0] // 300) * 300
-    latest = session.query(StatisticsShortTerm.start_ts).filter_by(metadata_id=metadata_id).order_by(
-        StatisticsShortTerm.start_ts.desc(),
-    ).first()
-    if latest is None or latest[0] < spike:
-        return None
-    prior = session.query(StatisticsShortTerm).filter(
-        StatisticsShortTerm.metadata_id == metadata_id, StatisticsShortTerm.start_ts < spike,
-        StatisticsShortTerm.state.is_not(None),
-    ).first()
-    counted = True
-    if prior is None:
-        initial = session.query(StatisticsShortTerm.start_ts).filter(
-            StatisticsShortTerm.metadata_id == metadata_id, StatisticsShortTerm.state.is_not(None),
-        ).order_by(StatisticsShortTerm.start_ts).first()
-        if initial is None:
-            return None
-        baseline = query.filter(States.last_updated_ts <= initial[0]).order_by(States.last_updated_ts.desc()).first()
-        if baseline is None or number(baseline[1]) is None:
-            baseline = next((row for row in query.filter(
-                States.last_updated_ts >= initial[0], States.last_updated_ts < initial[0] + 300,
-            ).order_by(States.last_updated_ts) if number(row[1]) is not None), None)
-        if baseline is None:
-            return None
-        counted = json.loads(baseline[2] or "{}").get("recovered_energy_wh", 0) < record["target"] - 1e-6
-    return {"spike": spike, "counted": counted}
+        if previous is not None and row["sum"] < previous - 1e-7:
+            negative.append(row["start"])
+        previous = row["sum"]
+        if row["start"] >= end:
+            break
+    return {"anchor": anchor, "rows": rows, "baseline": baseline, "end_sum": last,
+            "total": last - baseline if last is not None and baseline is not None else 0,
+            "negative": negative, "has_day": bool(day)}
 
 
 def snapshot(instance, entry_id, entities, bounds, pending):
-    """Capture rows and audit states together on the Recorder queue."""
+    """Public API reads: no private schema, metadata manager or DB markers."""
     start, end = bounds
     if start % 3600 or end % 3600:
         raise RecoveryError("repair_timezone")
-    result = {"panels": {}, "bounds": list(bounds), "marker": None}
-    with session_scope(session=instance.get_session(), read_only=True) as session:
-        result["marker"] = _marker(session, instance, marker_id(entry_id), _MARKER_TIME)
-        for panel, entity in entities.items():
-            meta = _metadata(session, instance, entity)
-            if meta is None:
+    result = {"panels": {}, "bounds": list(bounds)}
+    audits = read_audits(instance, entry_id, entities, entities.values())
+    for panel, entity in entities.items():
+        meta = metadata(instance, entity)
+        if not meta:
+            continue
+        factor = {"Wh": 1, "kWh": 1000, "MWh": 1000000}.get(meta["unit_of_measurement"])
+        if factor is None or meta.get("source") != "recorder":
+            raise RecoveryError("repair_unit")
+        data = {"entity": entity, "metadata": meta, "factor": factor,
+                "unit": meta["unit_of_measurement"], "pending": [],
+                "hour": _series(read_series(instance, entity, 0), start, end),
+                "short": _series(read_series(instance, entity, end, period="5minute"), end, end)}
+        for record in pending:
+            if record["panel"] != panel:
                 continue
-            metadata_id, details = meta
-            factor = {"Wh": 1.0, "kWh": 1000.0, "MWh": 1000000.0}.get(details["unit_of_measurement"])
-            if factor is None:
-                raise RecoveryError("repair_unit")
-            data = {
-                "entity": entity, "metadata_id": metadata_id, "factor": factor,
-                "unit": details["unit_of_measurement"], "pending": [],
-                "hour": _series(session, Statistics, metadata_id, start, end),
-                "short": _series(session, StatisticsShortTerm, metadata_id, start, end, all_rows=True),
-                "retention": time() - getattr(instance, "keep_days", 10) * 86400,
-            }
-            for record in pending:
-                if record["panel"] != panel:
-                    continue
-                stamp = datetime.fromisoformat(record["day"]).replace(tzinfo=UTC).timestamp()
-                audit_id = recovery_marker(entry_id, panel)
-                audit = _marker(session, instance, audit_id, stamp)
-                applied = audit is not None and audit >= record["target"] - 1e-6
-                data["pending"].append({
-                    "record": record, "audit_id": audit_id, "stamp": stamp, "audit": audit,
-                    "applied": applied,
-                    "increase": None if applied else _pending_increase(session, entity, metadata_id, record),
-                })
-            result["panels"][panel] = data
+            stamp = datetime.fromisoformat(record["day"]).replace(tzinfo=UTC).timestamp()
+            applied = any(t == stamp and target >= record["target"] - 1e-6 for t, target in audits.get(panel, []))
+            data["pending"].append({
+                "record": record, "applied": applied,
+                "spike": None if applied else counted_spike(instance, entity, record, meta),
+            })
+        result["panels"][panel] = data
     return result
 
 
-def _removal(data, stamp, duration):
-    return sum(sum(item["record"]["intervals"].values()) for item in data["pending"]
-               if not item["applied"] and item["increase"]["counted"]
-               and stamp >= item["increase"]["spike"] // duration * duration)
-
-
-def _alignment(data):
-    """Match five-minute sums to the same completed hourly endpoints."""
-    short = {row["start"]: row["sum"] for row in data["short"]["rows"] if row["sum"] is not None}
-    for row in reversed(data["hour"]["rows"]):
-        stamp = row["start"] + 3300
-        if row["sum"] is not None and stamp in short:
-            return row["sum"] - short[stamp]
-    if data["short"]["anchor"] is not None:
-        return data["hour"]["baseline"] - data["short"]["baseline"]
-    if not short:
-        return 0.0
-    raise RecoveryError("repair_no_alignment")
+def _delta_step(data, start, delta, previous_steps):
+    """Capture stable hour AND five-minute witnesses; appended rows may advance."""
+    witnesses = []
+    for name, period in (("hour", "hour"), ("short", "5minute")):
+        cutoff = start // 3600 * 3600 if name == "hour" else start
+        rows = [r for r in data[name]["rows"] if r["start"] >= cutoff and r.get("sum") is not None]
+        if not rows:
+            raise RecoveryError("repair_pending")
+        row = rows[-1]
+        before = row["sum"] + sum(s["delta"] for s in previous_steps
+                                  if s["kind"] == "delta" and s["entity"] == data["entity"]
+                                  and row["start"] >= (s["start"] // 3600 * 3600 if name == "hour" else s["start"]))
+        witnesses.append({"period": period, "start": row["start"], "before": before, "after": before + delta})
+    return {"kind": "delta", "entity": data["entity"], "start": start, "delta": delta,
+            "unit": data["unit"], "witnesses": witnesses, "phase": "prepared"}
 
 
 def replacement_plan(analysis, selected):
-    """Replace selected days; preserve nonselected panels and subsequent increments."""
     snap = analysis["snapshot"]
     if not selected or len(set(selected)) != len(selected) or set(selected) - set(snap["panels"]):
         raise RecoveryError("invalid_panels")
     start, end = snap["bounds"]
-    aggregate = analysis["aggregate"]
-    total = sum(aggregate.values())
-    kept = 0.0
+    total = sum(analysis["aggregate"].values())
+    kept = 0
     for panel, data in snap["panels"].items():
-        if panel in selected:
-            continue
-        if data["hour"]["negative"] or data["hour"]["total"] < 0 or any(
-            not item["applied"] for item in data["pending"]
-        ):
-            raise RecoveryError("repair_select_anomalous")
-        kept += data["hour"]["total"] * data["factor"]
-    minima = {panel: analysis["prior"].get(panel, {}).get("total", 0) for panel in selected}
+        if panel not in selected:
+            if (data["hour"]["baseline"] is None or not data["hour"]["has_day"]
+                or data["hour"]["negative"] or data["hour"]["total"] < 0
+                or any(not item["applied"] for item in data["pending"])):
+                raise RecoveryError("repair_select_anomalous")
+            kept += data["hour"]["total"] * data["factor"]
+    minima = {p: analysis["prior"].get(p, {}).get("total", 0) for p in selected}
     remaining = total - kept - sum(minima.values())
-    if remaining < -0.1:
+    if remaining < -.1:
         raise RecoveryError("energy_exceeds_aggregate")
-    weights = {panel: number(analysis["panels"][panel].get("power")) for panel in selected}
+    weights = {p: number(analysis["panels"][p].get("power")) for p in selected}
     if not all(weights.values()):
-        weights = dict.fromkeys(selected, 1.0)
-    targets = {panel: minima[panel] + max(0, remaining) * weights[panel] / sum(weights.values()) for panel in selected}
-    operations = []
-    tails = []
-    audits = {}
-    acknowledgements = []
+        weights = dict.fromkeys(selected, 1.)
+    targets = {p: minima[p] + max(0, remaining) * weights[p] / sum(weights.values()) for p in selected}
+    steps, operations, acknowledgements = [], [], []
     for panel in selected:
         data = snap["panels"][panel]
-        factor = data["factor"]
+        series = data["hour"]
+        tolerance = 1e-6 / data["factor"]
+        if series["baseline"] is None or series["end_sum"] is None:
+            raise RecoveryError("repair_no_statistics")  # Never invent a first baseline.
+        following = next((r for r in series["rows"] if r["start"] >= end and r.get("sum") is not None), None)
+        if following is not None and following["sum"] < series["end_sum"] - tolerance:
+            raise RecoveryError("repair_boundary")
+        # One common completed future endpoint must agree. A public delta moves
+        # both series equally and cannot fix an existing offset between them.
+        short = {r["start"]: r["sum"] for r in data["short"]["rows"] if r.get("sum") is not None}
+        common = [r for r in series["rows"] if r["start"] >= end
+                  and r["start"] + 3300 in short and r.get("sum") is not None]
+        if not common or abs(common[-1]["sum"] - short[common[-1]["start"] + 3300]) > tolerance:
+            raise RecoveryError("repair_no_alignment")
         for item in data["pending"]:
-            if item["record"]["day"] != analysis["day"]:
-                if not item["applied"]:
+            record = item["record"]
+            if not item["applied"]:
+                if (record["day"] != analysis["day"] or item["spike"] is None
+                    or record.get("statistics_journal")):
                     raise RecoveryError("repair_pending")
-                continue
-            if not item["applied"] and (item["record"]["day"] != analysis["day"] or item["increase"] is None):
-                raise RecoveryError("repair_pending")
-            acknowledgements.append(item["record"])
-            key = item["audit_id"]
-            audits[key] = {
-                "statistic_id": key, "stamp": item["stamp"], "before": item["audit"],
-                "after": max(item["record"]["target"], item["audit"] or 0, audits.get(key, {}).get("after", 0)),
-            }
-        desired = [(int(stamp), value * targets[panel] / total / factor if total else 0)
-                   for stamp, value in aggregate.items()]
-        baseline = data["hour"]["baseline"]
-        new_end = baseline + targets[panel] / factor
-        hourly_offset = new_end - data["hour"]["end_sum"]
-        alignment = _alignment(data)
-        for name, duration in (("hour", 3600), ("short", 300)):
-            series = data[name]
-            existing = {row["start"]: row for row in series["rows"]}
-            result = {stamp: row["sum"] for stamp, row in existing.items()}
-            delta = hourly_offset + (alignment if name == "short" else 0)
-            if name == "short" and series["anchor"] is not None:
-                before_shift = baseline - series["baseline"]
-                for stamp, row in existing.items():
-                    if stamp < start and row["sum"] is not None:
-                        result[stamp] = row["sum"] + before_shift
-            first = start - duration
-            retained_first = first
-            if name == "short":
-                retained_first = max(first, int(data["retention"] // duration) * duration)
-            # Retention limits new buckets, not existing ones: purge can lag or
-            # retention may have changed since those statistics were recorded.
-            stamps = set(range(retained_first, end, duration))
-            stamps.update(stamp for stamp in existing if first <= stamp < min(retained_first, end))
-            for stamp in stamps:
-                energy = sum(value * min(3, max(0, (stamp + duration - quarter) // 300)) / 3
-                             for quarter, value in desired)
-                result[stamp] = baseline + energy
-            for stamp, row in existing.items():
-                if stamp >= end and row["sum"] is not None:
-                    result[stamp] = row["sum"] + delta - _removal(data, stamp, duration) / factor
-            # Verify the whole reconstructed day and both joins. Existing later
-            # anomalies retain their increments and require their own dated repair.
-            points = sorted((stamp, value) for stamp, value in result.items() if value is not None)
-            last = None
-            for stamp, value in points:
-                if last is not None and start - duration <= stamp <= end and value < last - 1e-7:
-                    raise RecoveryError("repair_boundary")
-                if not isfinite(value):
-                    raise RecoveryError("repair_invalid_statistics")
-                last = value
-            for stamp, value in result.items():
-                before = existing.get(stamp)
-                if before is None or before["sum"] is None or value is None or abs(before["sum"] - value) > 1e-7:
-                    operations.append({
-                        "table": name, "metadata_id": data["metadata_id"], "start": stamp,
-                        "before": before["sum"] if before else None, "existed": before is not None,
-                        "after": value,
-                    })
-            latest = max(existing, default=end - duration)
-            tails.append({
-                "table": name, "metadata_id": data["metadata_id"], "latest": latest,
-                "offset": delta - _removal(data, float("inf"), duration) / factor,
-            })
-    return {
-        **analysis, "selected": list(selected), "targets": targets, "operations": operations,
-        "tails": tails, "audits": list(audits.values()), "acknowledgements": acknowledgements,
-    }
+            if record["day"] == analysis["day"]:
+                acknowledgements.append(record)
+        offset = series["baseline"] + targets[panel] / data["factor"] - series["end_sum"]
+        if abs(offset) > tolerance:
+            steps.append(_delta_step(data, end, offset, steps))
+        for item in data["pending"]:
+            if not item["applied"]:
+                delta = -sum(item["record"]["intervals"].values()) / data["factor"]
+                steps.append(_delta_step(data, item["spike"], delta, steps))
+        existing = {row["start"]: row for row in series["rows"]}
+        points = []
+        for stamp in range(start - 3600, end, 3600):
+            row = existing.get(stamp)
+            energy = sum(value for quarter, value in analysis["aggregate"].items() if int(quarter) < stamp + 3600)
+            after = series["baseline"] + (energy * targets[panel] / total / data["factor"] if total else 0)
+            if not isfinite(after):
+                raise RecoveryError("repair_invalid_statistics")
+            point = {"start": stamp, "before": row.get("sum") if row else None,
+                     "state": row.get("state") if row else None,
+                     "after": after, "existed": row is not None}
+            if row is None or row.get("sum") is None or abs(row["sum"] - after) > tolerance:
+                points.append(point)
+        if points:
+            steps.append(import_step(data["metadata"], points))
+            operations.extend(points)
+    return {**analysis, "selected": list(selected), "targets": targets, "operations": operations,
+            "acknowledgements": acknowledgements, "journal": {"steps": steps}}
 
 
-def apply_plan(instance, entry_id, plan, token):
-    """Compare the preview, write sums and acknowledge pending recoveries atomically."""
-    with session_scope(session=instance.get_session()) as session:
-        if _marker(session, instance, marker_id(entry_id), _MARKER_TIME) == token:
-            return
-        # Read-only snapshot comparison runs on the same queue before this job;
-        # compare again inside this transaction to reject stale previews.
-        # The proposed total also depends on every unselected panel's current
-        # daily energy; reject a preview if any of those statistics changed.
-        for panel in plan["snapshot"]["panels"]:
-            data = plan["snapshot"]["panels"][panel]
-            meta = _metadata(session, instance, data["entity"])
-            if meta is None or meta[0] != data["metadata_id"] or meta[1]["unit_of_measurement"] != data["unit"]:
-                raise RecoveryError("preview_stale")
-            for name, table in TABLES.items():
-                actual = _series(session, table, data["metadata_id"], *plan["snapshot"]["bounds"], all_rows=name == "short")
-                if actual != data[name]:
-                    raise RecoveryError("preview_stale")
-        if _marker(session, instance, marker_id(entry_id), _MARKER_TIME) != plan["snapshot"]["marker"]:
-            raise RecoveryError("preview_stale")
-        for audit in plan["audits"]:
-            if _marker(session, instance, audit["statistic_id"], audit["stamp"]) != audit["before"]:
-                raise RecoveryError("preview_stale")
-        for operation in plan["operations"]:
-            table = TABLES[operation["table"]]
-            row = session.query(table).filter_by(metadata_id=operation["metadata_id"], start_ts=operation["start"]).first()
-            if row is not None:
-                row.sum = operation["after"]
-            else:
-                session.add(table.from_stats(operation["metadata_id"], {
-                    "start": datetime.fromtimestamp(operation["start"], UTC), "sum": operation["after"],
-                }, time()))
-        for audit in plan["audits"]:
-            _set_marker(session, instance, audit["statistic_id"], audit["stamp"], audit["after"])
-        _set_marker(session, instance, marker_id(entry_id), _MARKER_TIME, token)
-
-
-def undo_plan(instance, entry_id, backup):
-    """Restore saved sums; later appended rows lose the repair's final offset."""
-    plan = backup["plan"]
-    with session_scope(session=instance.get_session()) as session:
-        current = _marker(session, instance, marker_id(entry_id), _MARKER_TIME)
-        if current == plan["snapshot"]["marker"]:
-            return
-        if current != backup["token"]:
-            raise RecoveryError("repair_undo_conflict")
-        for data in (plan["snapshot"]["panels"][panel] for panel in plan["selected"]):
-            meta = _metadata(session, instance, data["entity"])
-            if meta is None or meta[0] != data["metadata_id"] or meta[1]["unit_of_measurement"] != data["unit"]:
-                raise RecoveryError("repair_undo_conflict")
-        for operation in plan["operations"]:
-            table = TABLES[operation["table"]]
-            row = session.query(table).filter_by(metadata_id=operation["metadata_id"], start_ts=operation["start"]).first()
-            if row is None and operation["table"] == "short" and operation["start"] < time() - getattr(instance, "keep_days", 10) * 86400:
-                continue  # Do not resurrect data already purged by Recorder.
-            if row is None or row.sum is None or abs(row.sum - operation["after"]) > 1e-7:
-                raise RecoveryError("repair_undo_conflict")
-            if operation["existed"]:
-                row.sum = operation["before"]
-            else:
-                session.delete(row)
-        for tail in plan["tails"]:
-            table = TABLES[tail["table"]]
-            for row in session.query(table).filter(
-                table.metadata_id == tail["metadata_id"], table.start_ts > tail["latest"], table.sum.is_not(None),
-            ):
-                row.sum -= tail["offset"]
-        for audit in plan["audits"]:
-            if _marker(session, instance, audit["statistic_id"], audit["stamp"]) != audit["after"]:
-                raise RecoveryError("repair_undo_conflict")
-            _set_marker(session, instance, audit["statistic_id"], audit["stamp"], audit["before"])
-        _set_marker(session, instance, marker_id(entry_id), _MARKER_TIME, plan["snapshot"]["marker"])
+def undo_journal(plan):
+    """Inverse deltas and replacement sums, but never delete imported buckets."""
+    if any(not p["existed"] for s in plan["journal"]["steps"] if s["kind"] == "import" for p in s["points"]):
+        raise RecoveryError("repair_undo_conflict")
+    steps = []
+    for original in reversed(plan["journal"]["steps"]):
+        if original["kind"] == "import":
+            points = [{**p, "before": p["after"], "after": p["before"]} for p in original["points"]]
+            steps.append(import_step(original["metadata"], points))
+        else:
+            steps.append({**original, "phase": "prepared", "delta": -original["delta"],
+                          "witnesses": [{**p, "before": p["after"], "after": p["before"]}
+                                        for p in original["witnesses"]]})
+    return {"steps": steps}
