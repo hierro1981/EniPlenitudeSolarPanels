@@ -13,9 +13,8 @@ associati al proprio account Plenitude, tramite le API del portale My Eni.
 Il servizio è basato sul cloud Plenitude: disponibilità, frequenza dei dati e
 accesso dipendono dal portale e dalle sue API.
 
-**Sito del prodotto:** [solar.ramaya.org](https://solar.ramaya.org/).
-File statici in `site/`, pubblicati tramite GitHub Pages;
-[manutenzione e pubblicazione del sito](docs/sito-web.md).
+Scopri funzionalità e informazioni sul
+[sito di Plenitude Solar Panels](https://solar.ramaya.org/).
 
 ## Funzionalità
 
@@ -234,6 +233,7 @@ passaggi per riprodurlo. Allega solo log ripuliti da credenziali e dati personal
 
 - [Recupero produzione e riparazione statistiche](docs/recupero-produzione.md)
 - [Sviluppo e test](docs/sviluppo.md)
+- [Manutenzione e pubblicazione del sito](docs/sito-web.md)
 - [Pubblicazione e inclusione nel catalogo HACS](docs/pubblicazione-hacs.md)
 - [Riferimento tecnico dettagliato, in inglese](docs/technical-reference.md)
 - [Strumenti Node opzionali e cancellazione manuale](tools/node/README.md)
